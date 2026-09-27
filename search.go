@@ -238,9 +238,33 @@ func pluralize(n int, one, many string) string {
 func (s *SearchPanel) show(status string, results []match, needle string) {
 	s.store.Clear()
 	s.status.SetText(status)
+	// Symbol results list their definitions first, in a group of their own.
+	var defs []match
+	for _, m := range results {
+		if m.isDef {
+			defs = append(defs, m)
+		}
+	}
+	if len(defs) > 0 {
+		di := s.store.Append(nil)
+		s.store.SetValue(di, srMarkup, fmt.Sprintf("<b>Definitions</b> <small>(%d)</small>", len(defs)))
+		s.store.SetValue(di, srPath, "")
+		s.store.SetValue(di, srLine, -1)
+		s.store.SetValue(di, srCol, 0)
+		for _, m := range defs {
+			ci := s.store.Append(di)
+			s.store.SetValue(ci, srMarkup, "<small>"+html.EscapeString(relPath(s.app.root, m.path))+"</small> "+matchMarkup(m, needle))
+			s.store.SetValue(ci, srPath, m.path)
+			s.store.SetValue(ci, srLine, m.line)
+			s.store.SetValue(ci, srCol, m.colByte)
+		}
+	}
 	byFile := map[string][]match{}
 	var files []string
 	for _, m := range results {
+		if m.isDef {
+			continue
+		}
 		if _, ok := byFile[m.path]; !ok {
 			files = append(files, m.path)
 		}

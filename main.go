@@ -374,10 +374,10 @@ func (a *App) showSymbolResults(from *Editor, line int, name string, clickedDef 
 			a.setStatusMsg(fmt.Sprintf("Definition of “%s” — %s:%d", name, relPath(a.root, target.Path), target.Line+1))
 			return
 		}
-		a.showRefs(fmt.Sprintf("%s of “%s”", pluralize(len(defs), "definition", "definitions"), name), defs, name)
-		return
 	}
-	a.showRefs(fmt.Sprintf("%s of “%s”", pluralize(len(refs), "usage", "usages"), name), refs, name)
+	// No single definition to jump to: list definitions (first) and usages.
+	a.showRefs(fmt.Sprintf("%s, %s of “%s”", pluralize(len(defs), "definition", "definitions"),
+		pluralize(len(refs)-len(defs), "usage", "usages"), name), refs, name)
 }
 
 // pickDefinition chooses the most likely definition: the nearest preceding

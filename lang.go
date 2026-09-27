@@ -652,7 +652,8 @@ func (l *Language) structuralDef(n *ts.Node, src []byte) bool {
 		}
 	case "parameters", "typed_parameter", "default_parameter", "typed_default_parameter", "formal_parameters",
 		"pointer_declarator", "array_declarator", "reference_declarator", "parameter_declaration", "variadic_parameter_declaration":
-		return true
+		// A parameter's type (e.g. Go's `x bool` or an unnamed result type) is a reference.
+		return fieldOf(p, n) != "type"
 	}
 	if len(l.DefParents) > 0 {
 		for a, depth := p, 0; a != nil && depth < 5; a, depth = a.Parent(), depth+1 {

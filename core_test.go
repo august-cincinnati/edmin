@@ -122,6 +122,15 @@ func TestGoSymbols(t *testing.T) {
 			t.Errorf("no definition found for %s", n)
 		}
 	}
+	// Parameter and result types are references, not definitions.
+	src := "package p\ntype Ref struct{}\nfunc f(x Ref, ok bool) (Ref, bool) { return x, ok }\n"
+	for _, n := range []string{"Ref", "bool"} {
+		for _, r := range lang.FindRefs("x.go", []byte(src), n) {
+			if r.IsDef && r.Line != 1 {
+				t.Errorf("parameter type %s marked as definition: %+v", n, r)
+			}
+		}
+	}
 }
 
 // Every official tree-sitter grammar: a definition and a usage of a symbol.

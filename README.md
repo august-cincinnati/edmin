@@ -23,9 +23,10 @@ dependencies; everything else, including the terminal emulator, is plain Go.
 - **Find in project** (`Ctrl+Shift+F`) searches every text file, with
   results grouped by file. Click a result to open the file at that line.
 - **Go to definition / Find usages** (`Ctrl+Click` on a symbol):
-  - Clicking a usage jumps to its definition. If there are several
-    candidates, they are listed.
-  - Clicking a definition lists every usage in the project.
+  - Clicking a usage jumps to its definition.
+  - Otherwise (you clicked a definition, there are several candidates, or
+    the definition is outside the project) the search panel lists a
+    **Definitions** group first, followed by every usage grouped by file.
   - Works in every language listed under [Languages](#languages).
 - **Terminals** in tabs along the bottom. Each runs your `$SHELL` through a
   pseudo-terminal and a built-in xterm-compatible emulator that supports
