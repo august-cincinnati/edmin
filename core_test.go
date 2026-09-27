@@ -1,0 +1,276 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func screenLine(v *VT, y int) string {
+	return strings.TrimRight(strings.Split(v.PlainText(), "\n")[y], " ")
+}
+
+func TestVTBasics(t *testing.T) {
+	v := NewVT(5, 20)
+	v.Write([]byte("hello\r\nworld"))
+	if got := screenLine(v, 0); got != "hello" {
+		t.Fatalf("line0 = %q", got)
+	}
+	if got := screenLine(v, 1); got != "world" {
+		t.Fatalf("line1 = %q", got)
+	}
+	// Cursor movement, erase line, colors.
+	v.Write([]byte("\x1b[1;1H\x1b[31mHE\x1b[0m\x1b[K"))
+	if got := screenLine(v, 0); got != "HE" {
+		t.Fatalf("after CUP/EL line0 = %q", got)
+	}
+	if v.lines[0][0].a.fg != 1 || v.lines[0][2].a.fg != colorDefault {
+		t.Fatalf("SGR not applied: %+v", v.lines[0][:3])
+	}
+	// Split UTF-8 sequence across writes.
+	v.Write([]byte("\x1b[3;1H\xe2\x82"))
+	v.Write([]byte("\xac"))
+	if got := screenLine(v, 2); got != "€" {
+		t.Fatalf("utf8 line = %q", got)
+	}
+}
+
+func TestVTScrollback(t *testing.T) {
+	v := NewVT(3, 10)
+	for i := 0; i < 5; i++ {
+		v.Write([]byte{byte('a' + i), '\r', '\n'})
+	}
+	s := v.Snapshot()
+	if len(s.Scrollback) != 3 {
+		t.Fatalf("scrollback = %d lines, want 3", len(s.Scrollback))
+	}
+	if s.Scrollback[0][0].ch != 'a' || s.Lines[0][0].ch != 'd' {
+		t.Fatalf("unexpected scroll state")
+	}
+	// Alternate screen does not push to scrollback and restores content.
+	v.Write([]byte("\x1b[?1049hXYZ\r\n\r\n\r\n\r\n\x1b[?1049l"))
+	if s := v.Snapshot(); len(s.Scrollback) != 0 || s.Lines[0][0].ch != 'd' {
+		t.Fatalf("alt screen leaked: sb=%d first=%q", len(s.Scrollback), s.Lines[0][0].ch)
+	}
+	v.Resize(2, 5)
+	v.Resize(4, 12)
+	if v.rows != 4 || len(v.lines[0]) != 12 {
+		t.Fatalf("resize failed")
+	}
+}
+
+func TestVTWrapAndReply(t *testing.T) {
+	v := NewVT(3, 4)
+	var reply string
+	v.Reply = func(b []byte) { reply = string(b) }
+	v.Write([]byte("abcdef"))
+	if screenLine(v, 0) != "abcd" || screenLine(v, 1) != "ef" {
+		t.Fatalf("wrap: %q", v.PlainText())
+	}
+	v.Write([]byte("\x1b[6n"))
+	if reply != "\x1b[2;3R" {
+		t.Fatalf("DSR reply = %q", reply)
+	}
+	v.Write([]byte("\x1bc"))
+	if strings.TrimSpace(v.PlainText()) != "" {
+		t.Fatalf("reset did not clear")
+	}
+}
+
+const goSrc = `package demo
+
+type Thing struct{ N int }
+
+func helper(x int) int { return x + 1 }
+
+func (t *Thing) Run() int {
+	v := helper(t.N)
+	return v
+}
+
+func main() {
+	var th Thing
+	th.Run()
+	_ = helper(2)
+}
+`
+
+func TestGoSymbols(t *testing.T) {
+	lang := languageFor("x.go")
+	sym, ok := lang.SymbolAt([]byte(goSrc), 7, 7) // helper call
+	if !ok || sym.Name != "helper" || sym.IsDef {
+		t.Fatalf("SymbolAt call = %+v ok=%v", sym, ok)
+	}
+	sym, ok = lang.SymbolAt([]byte(goSrc), 4, 6) // helper declaration
+	if !ok || sym.Name != "helper" || !sym.IsDef {
+		t.Fatalf("SymbolAt decl = %+v ok=%v", sym, ok)
+	}
+	refs := lang.FindRefs("x.go", []byte(goSrc), "helper")
+	if len(refs) != 3 {
+		t.Fatalf("helper refs = %d, want 3", len(refs))
+	}
+	for _, r := range refs {
+		if r.IsDef != (r.Line == 4) {
+			t.Fatalf("wrong def flag: %+v", r)
+		}
+	}
+	for _, n := range []string{"Thing", "Run", "v", "th"} {
+		found := false
+		for _, r := range lang.FindRefs("x.go", []byte(goSrc), n) {
+			found = found || r.IsDef
+		}
+		if !found {
+			t.Errorf("no definition found for %s", n)
+		}
+	}
+}
+
+// Every official tree-sitter grammar: a definition and a usage of a symbol.
+var langSamples = []struct {
+	file, src, name string
+	noDef           bool // language has no notion of a definition for this symbol
+}{
+	{"a.agda", "module Test where\ndata Nat : Set where\n  zero : Nat\n  suc : Nat -> Nat\ngreet : Nat -> Nat\ngreet n = suc n\ntwo : Nat\ntwo = greet zero\n", "greet", false},
+	{"a.sh", "greet() {\n  echo hi\n}\ngreet\n", "greet", false},
+	{"a.c", "int greet(int a) { return a; }\nint main(void) { return greet(1); }\n", "greet", false},
+	{"a.cpp", "namespace n { int greet(int a) { return a; } }\nint main() { return n::greet(1); }\n", "greet", false},
+	{"a.cs", "class A {\n  static int Greet(int a) { return a; }\n  static void Main() { Greet(1); }\n}\n", "Greet", false},
+	{"a.css", ":root { --brand: red; }\na { color: var(--brand); }\n", "--brand", false},
+	{"a.erb", "<% def greet(n) n end %>\n<p><%= greet(1) %></p>\n", "greet", false},
+	{"a.ejs", "<% function greet(n) { return n } %>\n<p><%= greet(1) %></p>\n", "greet", false},
+	{"a.go", goSrc, "helper", false},
+	{"a.hs", "module Main where\ngreet :: Int -> Int\ngreet n = n\nmain = print (greet 1)\n", "greet", false},
+	{"a.html", "<div><span>x</span></div>\n<span>y</span>\n", "span", true},
+	{"a.java", "class A {\n  static int greet(int a) { return a; }\n  void m() { greet(1); }\n}\n", "greet", false},
+	{"a.js", "function greet(a) { return a }\ngreet(1)\n", "greet", false},
+	{"a.json", "{\"greet\": 1, \"other\": \"greet\"}\n", "greet", false},
+	{"a.jl", "function greet(x)\n  x\nend\ngreet(1)\n", "greet", false},
+	{"a.ml", "let greet x = x\nlet () = ignore (greet 1)\n", "greet", false},
+	{"a.mli", "type t\nval greet : t -> t\nval twice : t -> t\n", "t", false},
+	{"a.php", "<?php\nfunction greet($a) { return $a; }\ngreet(1);\n", "greet", false},
+	{"a.py", "def greet(name):\n    return name\n\ngreet('x')\n", "greet", false},
+	{"a.rb", "def greet(a)\n  a\nend\ngreet(1)\n", "greet", false},
+	{"a.rs", "fn greet(a: i32) -> i32 { a }\nfn main() { greet(1); }\n", "greet", false},
+	{"a.scala", "object A {\n  def greet(a: Int): Int = a\n  val x = greet(1)\n}\n", "greet", false},
+	{"a.ts", "function greet(a: number): number { return a }\ngreet(1)\n", "greet", false},
+	{"a.tsx", "const Greet = () => <div/>;\nconst x = <Greet/>;\n", "Greet", false},
+	{"a.v", "module greet(input a);\nendmodule\nmodule top;\n  greet g(.a(1'b1));\nendmodule\n", "greet", false},
+}
+
+func TestAllLanguagesDefinitions(t *testing.T) {
+	for _, tc := range langSamples {
+		lang := languageFor(tc.file)
+		if lang == nil {
+			t.Errorf("%s: no language", tc.file)
+			continue
+		}
+		refs := lang.FindRefs(tc.file, []byte(tc.src), tc.name)
+		var def, use *SymbolRef
+		for i := range refs {
+			if refs[i].IsDef && def == nil {
+				def = &refs[i]
+			} else if !refs[i].IsDef {
+				use = &refs[i]
+			}
+		}
+		if use == nil || def == nil && !tc.noDef {
+			t.Errorf("%s (%s): refs=%+v", tc.file, lang.Name, refs)
+			continue
+		}
+		// Ctrl+Click on the usage must resolve to the same symbol.
+		sym, ok := lang.SymbolAt([]byte(tc.src), use.Line, use.ColByte)
+		if !ok || sym.Name != tc.name || sym.IsDef {
+			t.Errorf("%s (%s): SymbolAt usage = %+v ok=%v", tc.file, lang.Name, sym, ok)
+		}
+		// pickDefinition must choose a definition for the usage.
+		var defs []SymbolRef
+		for _, r := range refs {
+			if r.IsDef {
+				defs = append(defs, r)
+			}
+		}
+		if !tc.noDef {
+			if _, ok := pickDefinition(tc.file, use.Line, defs); !ok {
+				t.Errorf("%s: no definition picked from %+v", tc.file, defs)
+			}
+		}
+	}
+}
+
+func TestQueriesCompile(t *testing.T) {
+	for _, l := range append(languages, langJSDoc, langRegex) {
+		l.init()
+		if len(l.Highlights) > 0 && l.hl == nil {
+			t.Errorf("%s: highlights query failed to compile", l.Name)
+		}
+		if len(l.Tags) > 0 && l.tags == nil {
+			t.Errorf("%s: tags query failed to compile", l.Name)
+		}
+		if len(l.Locals) > 0 && l.locals == nil {
+			t.Errorf("%s: locals query failed to compile", l.Name)
+		}
+	}
+	for _, tc := range langSamples {
+		if spans := languageFor(tc.file).Highlight([]byte(tc.src)); len(spans) == 0 {
+			t.Errorf("%s: no highlight spans", tc.file)
+		}
+	}
+}
+
+func TestJSDocAndRegex(t *testing.T) {
+	js := languageFor("a.js")
+	src := "class Foo {}\n/** @param {Foo} x */\nfunction f(x) {}\n"
+	sym, ok := js.SymbolAt([]byte(src), 1, strings.Index("/** @param {Foo} x */", "Foo")+1)
+	if !ok || sym.Name != "Foo" {
+		t.Fatalf("JSDoc symbol = %+v ok=%v", sym, ok)
+	}
+	src = "const r = /(?<year>\\d+)-\\k<year>/;\n"
+	col := strings.LastIndex(src, "year")
+	sym, ok = js.SymbolAt([]byte(src), 0, col)
+	if !ok || sym.Name != "year" || len(sym.Local) != 2 || !sym.Local[0].IsDef || sym.Local[1].IsDef {
+		t.Fatalf("regex group symbol = %+v ok=%v", sym, ok)
+	}
+	if sym.Local[0].ColByte != strings.Index(src, "year") {
+		t.Fatalf("regex def column = %d", sym.Local[0].ColByte)
+	}
+}
+
+func TestHighlight(t *testing.T) {
+	spans := languageFor("x.go").Highlight([]byte(goSrc))
+	classes := map[string]bool{}
+	for _, s := range spans {
+		classes[s.Class] = true
+	}
+	for _, c := range []string{hlKeyword, hlType, hlFunction, hlNumber} {
+		if !classes[c] {
+			t.Errorf("missing highlight class %s", c)
+		}
+	}
+}
+
+func TestWordRefs(t *testing.T) {
+	refs := findWordRefs("f.txt", []byte("foo food foo_bar foo\n"), "foo")
+	if len(refs) != 2 {
+		t.Fatalf("word refs = %d", len(refs))
+	}
+}
+
+func TestPtyShell(t *testing.T) {
+	master, cmd, err := startShell(t.TempDir(), 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	master.Write([]byte("echo EDMIN_$((40+2))\rexit\r"))
+	var out []byte
+	buf := make([]byte, 4096)
+	for !strings.Contains(string(out), "EDMIN_42") {
+		n, err := master.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	if !strings.Contains(string(out), "EDMIN_42") {
+		t.Fatalf("shell output missing: %q", out)
+	}
+}
