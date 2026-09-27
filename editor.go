@@ -49,15 +49,10 @@ type EditorArea struct {
 	welcome  *gtk.Label
 }
 
-var highlightColors = map[string]map[string]interface{}{
-	hlKeyword:  {"foreground": "#af00db", "weight": 700},
-	hlString:   {"foreground": "#a31515"},
-	hlComment:  {"foreground": "#008000", "style": 2},
-	hlNumber:   {"foreground": "#098658"},
-	hlType:     {"foreground": "#267f99"},
-	hlFunction: {"foreground": "#795e26"},
-	hlConstant: {"foreground": "#0000ff"},
-	hlProperty: {"foreground": "#001080"},
+// highlightStyles are the non-colour tag properties; colours come from the theme.
+var highlightStyles = map[string]map[string]interface{}{
+	hlKeyword: {"weight": 700},
+	hlComment: {"style": 2},
 }
 
 func NewEditorArea(app *App) *EditorArea {
@@ -141,11 +136,16 @@ func (a *EditorArea) Open(path string) *Editor {
 	e.View.SetWrapMode(gtk.WRAP_NONE)
 	e.Buf, _ = e.View.GetBuffer()
 	e.Root.Add(e.View)
-	for name, props := range highlightColors {
+	for name := range theme.Syntax {
+		props := map[string]interface{}{}
+		for k, v := range highlightStyles[name] {
+			props[k] = v
+		}
 		e.Buf.CreateTag(name, props)
 	}
-	e.Buf.CreateTag("search-match", map[string]interface{}{"background": "#ffe066"})
-	e.Buf.CreateTag("jump-line", map[string]interface{}{"paragraph-background": "#e8f0fe"})
+	e.Buf.CreateTag("search-match", nil)
+	e.Buf.CreateTag("jump-line", nil)
+	e.styleTags()
 	e.Buf.SetText(string(data))
 	e.Buf.PlaceCursor(e.Buf.GetStartIter())
 	e.Buf.SetModified(false)
@@ -205,6 +205,23 @@ func (a *EditorArea) Unsaved() []*Editor {
 		}
 	}
 	return out
+}
+
+// styleTags colours the editor's tags from the active theme.
+func (e *Editor) styleTags() {
+	tt, _ := e.Buf.GetTagTable()
+	set := func(name string, props map[string]string) {
+		if tag, err := tt.Lookup(name); err == nil && tag != nil {
+			for k, v := range props {
+				tag.SetProperty(k, v)
+			}
+		}
+	}
+	for name, fg := range theme.Syntax {
+		set(name, map[string]string{"foreground": fg})
+	}
+	set("search-match", map[string]string{"background": theme.MatchBG, "foreground": theme.MatchFG})
+	set("jump-line", map[string]string{"paragraph-background": theme.JumpLine})
 }
 
 func (e *Editor) Text() string {
@@ -384,7 +401,7 @@ func (e *Editor) highlight() {
 
 func (e *Editor) applyHighlights(spans []Span) {
 	start, end := e.Buf.GetBounds()
-	for name := range highlightColors {
+	for name := range theme.Syntax {
 		e.Buf.RemoveTagByName(name, start, end)
 	}
 	nlines := e.Buf.GetLineCount()

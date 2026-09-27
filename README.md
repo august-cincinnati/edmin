@@ -28,6 +28,9 @@ dependencies; everything else, including the terminal emulator, is plain Go.
     the definition is outside the project) the search panel lists a
     **Definitions** group first, followed by every usage grouped by file.
   - Works in every language listed under [Languages](#languages).
+- **Themes**: Light, Dark, Tan and Solarized Dark. Choose one in Settings
+  (the menu button in the header bar, or `Ctrl+,`). It applies immediately
+  and is remembered in `~/.config/edmin/settings.json`.
 - **Terminals** in tabs along the bottom. Each runs your `$SHELL` through a
   pseudo-terminal and a built-in xterm-compatible emulator that supports
   colors, scrollback, and full-screen programs such as `vim` and `less`.
@@ -137,6 +140,7 @@ Use the folder button in the header bar, or `Ctrl+O`, to switch projects.
 | `Ctrl+G`                    | Go to line                               |
 | `Ctrl+Click`                | Go to definition / find usages           |
 | `Ctrl+O`                    | Open folder                              |
+| `Ctrl+,`                    | Settings (theme)                         |
 | `Ctrl+B`                    | Toggle file explorer                     |
 | `` Ctrl+` ``                | Toggle terminal panel                    |
 | `` Ctrl+Shift+` ``          | New terminal                             |

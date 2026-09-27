@@ -14,3 +14,4 @@
 - Ability to Ctrl + Click on symbols to Find Usages and Jump to Definition in every language with an official tree-sitter parser: Agda, Bash, C, C++, C#, CSS, ERB / EJS, Go, Haskell, HTML, Java, JavaScript, JSDoc, JSON, Julia, OCaml, PHP, Python, Regex, Ruby, Rust, Scala, TypeScript, Verilog
 - A collapsible, tabbed Terminal Window creator at the bottom
 - A collapsible Build window on the right that allows you to create and store named CLI commands and double click them to execute in the open terminal window
+- A Settings window (Ctrl + ,) with theme options: Light, Dark, Tan and Solarized Dark

@@ -35,6 +35,10 @@ type SearchPanel struct {
 	view   *gtk.TreeView
 	store  *gtk.TreeStore
 	gen    atomic.Int64
+
+	// The results on display, re-rendered when the theme changes.
+	lastStatus, lastNeedle string
+	lastResults            []match
 }
 
 type match struct {
@@ -236,6 +240,7 @@ func pluralize(n int, one, many string) string {
 
 // show fills the results tree grouped by file.
 func (s *SearchPanel) show(status string, results []match, needle string) {
+	s.lastStatus, s.lastResults, s.lastNeedle = status, results, needle
 	s.store.Clear()
 	s.status.SetText(status)
 	// Symbol results list their definitions first, in a group of their own.
@@ -291,6 +296,13 @@ func (s *SearchPanel) show(status string, results []match, needle string) {
 	}
 }
 
+// restyle redraws the current results in the active theme's colours.
+func (s *SearchPanel) restyle() {
+	if s.lastResults != nil {
+		s.show(s.lastStatus, s.lastResults, s.lastNeedle)
+	}
+}
+
 func matchMarkup(m match, needle string) string {
 	text := strings.TrimLeft(m.text, " \t")
 	trimmed := len(m.text) - len(text)
@@ -301,13 +313,13 @@ func matchMarkup(m match, needle string) string {
 		}
 		text = text[:cut]
 	}
-	prefix := fmt.Sprintf("<span foreground=\"#888888\">%d:</span> ", m.line+1)
+	prefix := fmt.Sprintf("<span foreground=\"%s\">%d:</span> ", theme.Dim, m.line+1)
 	if m.isDef {
-		prefix += "<span foreground=\"#267f99\"><b>def</b></span> "
+		prefix += fmt.Sprintf("<span foreground=\"%s\"><b>def</b></span> ", theme.DefMarker)
 	}
 	col := m.colByte - trimmed
 	if col >= 0 && col+len(needle) <= len(text) {
-		return prefix + html.EscapeString(text[:col]) + "<b><span background=\"#ffe066\">" +
+		return prefix + html.EscapeString(text[:col]) + fmt.Sprintf("<b><span background=\"%s\" foreground=\"%s\">", theme.MatchBG, theme.MatchFG) +
 			html.EscapeString(text[col:col+len(needle)]) + "</span></b>" + html.EscapeString(text[col+len(needle):])
 	}
 	return prefix + html.EscapeString(text)

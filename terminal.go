@@ -12,11 +12,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 )
 
-const (
-	termBG         = "#1e1e1e"
-	termFG         = "#d4d4d4"
-	termScrollback = 5000
-)
+const termScrollback = 5000
 
 // Terminal is a GTK widget hosting a shell in a pty, rendered through VT.
 type Terminal struct {
@@ -41,8 +37,6 @@ type Terminal struct {
 	follow       bool // keep the view pinned to the bottom
 }
 
-var termCSSInstalled bool
-
 func NewTerminal(dir string, onExit func()) *Terminal {
 	t := &Terminal{dir: dir, onExit: onExit, tags: map[attr]*gtk.TextTag{}}
 	t.Root, _ = gtk.ScrolledWindowNew(nil, nil)
@@ -57,14 +51,7 @@ func NewTerminal(dir string, onExit func()) *Terminal {
 	t.Root.Add(t.view)
 	t.buf, _ = t.view.GetBuffer()
 
-	if !termCSSInstalled {
-		termCSSInstalled = true
-		css, _ := gtk.CssProviderNew()
-		css.LoadFromData(fmt.Sprintf(`#edmin-terminal, #edmin-terminal text { background-color: %s; color: %s; }`, termBG, termFG))
-		screen, _ := gdk.ScreenGetDefault()
-		gtk.AddProviderForScreen(screen, css, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-	}
-	t.cursorTag = t.buf.CreateTag("cursor", map[string]interface{}{"background": termFG, "foreground": termBG})
+	t.cursorTag = t.buf.CreateTag("cursor", map[string]interface{}{"background": theme.TermFG, "foreground": theme.TermBG})
 
 	t.buf.SetText("MM\nMM")
 	t.follow = true
@@ -206,6 +193,38 @@ func colorHex(c int, def string) string {
 	}
 }
 
+// colors resolves a's foreground and background in the active theme; bg is
+// empty when it is the terminal's default background.
+func (a attr) colors() (fg, bg string) {
+	f, b := a.fg, a.bg
+	if a.bold && f >= 0 && f < 8 {
+		f += 8
+	}
+	fg, bg = colorHex(f, theme.TermFG), colorHex(b, theme.TermBG)
+	if a.inverse {
+		fg, bg = bg, fg
+	}
+	if bg == theme.TermBG {
+		bg = ""
+	}
+	return fg, bg
+}
+
+// restyle recolours existing text after a theme change.
+func (t *Terminal) restyle() {
+	for a, tag := range t.tags {
+		fg, bg := a.colors()
+		tag.SetProperty("foreground", fg)
+		if bg != "" {
+			tag.SetProperty("background", bg)
+		} else {
+			tag.SetProperty("background-set", false)
+		}
+	}
+	t.cursorTag.SetProperty("background", theme.TermFG)
+	t.cursorTag.SetProperty("foreground", theme.TermBG)
+}
+
 func (t *Terminal) tagFor(a attr) *gtk.TextTag {
 	if a == defaultAttr {
 		return nil
@@ -213,16 +232,9 @@ func (t *Terminal) tagFor(a attr) *gtk.TextTag {
 	if tag, ok := t.tags[a]; ok {
 		return tag
 	}
-	fg, bg := a.fg, a.bg
-	if a.bold && fg >= 0 && fg < 8 {
-		fg += 8
-	}
-	fgs, bgs := colorHex(fg, termFG), colorHex(bg, termBG)
-	if a.inverse {
-		fgs, bgs = bgs, fgs
-	}
+	fgs, bgs := a.colors()
 	props := map[string]interface{}{"foreground": fgs}
-	if bgs != termBG {
+	if bgs != "" {
 		props["background"] = bgs
 	}
 	if a.bold {

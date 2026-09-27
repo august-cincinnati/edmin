@@ -66,6 +66,7 @@ func (a *App) buildUI() {
 		gtk.MainQuit()
 	})
 	a.win.Connect("key-press-event", a.onKey)
+	a.applyTheme(themeByName(loadSettings().Theme))
 
 	a.editors = NewEditorArea(a)
 	a.tree = NewFileTree(a)
@@ -80,6 +81,9 @@ func (a *App) buildUI() {
 	openBtn.SetTooltipText("Open folder (Ctrl+O)")
 	openBtn.Connect("clicked", a.openFolder)
 	hb.PackStart(openBtn)
+	settingsBtn, _ := gtk.ButtonNewFromIconName("open-menu-symbolic", gtk.ICON_SIZE_BUTTON)
+	settingsBtn.SetTooltipText("Settings (Ctrl+,)")
+	settingsBtn.Connect("clicked", a.showSettings)
 	mkToggle := func(icon, tip string) *gtk.ToggleButton {
 		b, _ := gtk.ToggleButtonNew()
 		img, _ := gtk.ImageNewFromIconName(icon, gtk.ICON_SIZE_BUTTON)
@@ -91,6 +95,7 @@ func (a *App) buildUI() {
 	a.buildBtn = mkToggle("system-run-symbolic", "Build panel (Ctrl+Shift+B)")
 	a.termBtn = mkToggle("utilities-terminal-symbolic", "Terminal (Ctrl+`)")
 	a.leftBtn = mkToggle("view-list-symbolic", "Explorer (Ctrl+B)")
+	hb.PackEnd(settingsBtn)
 	hb.PackEnd(a.buildBtn)
 	hb.PackEnd(a.termBtn)
 	hb.PackEnd(a.leftBtn)
@@ -139,6 +144,9 @@ func (a *App) buildUI() {
 	a.status.SetMarginStart(8)
 	a.status.SetMarginTop(2)
 	a.status.SetMarginBottom(2)
+	if sc, err := a.status.GetStyleContext(); err == nil {
+		sc.AddClass("edmin-status")
+	}
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	box.PackStart(lpaned, true, true, 0)
@@ -595,6 +603,11 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 	case gdk.KEY_o:
 		if ctrl {
 			a.openFolder()
+			return true
+		}
+	case gdk.KEY_comma:
+		if ctrl {
+			a.showSettings()
 			return true
 		}
 	case gdk.KEY_z:
