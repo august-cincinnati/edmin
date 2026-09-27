@@ -600,6 +600,11 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 			a.leftBtn.SetActive(!a.leftBtn.GetActive())
 			return true
 		}
+	case gdk.KEY_n:
+		a.leftBtn.SetActive(true)
+		a.leftPanel.SetCurrentPage(0)
+		a.tree.create(ctrlShift)
+		return true
 	case gdk.KEY_o:
 		if ctrl {
 			a.openFolder()

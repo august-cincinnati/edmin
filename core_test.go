@@ -283,3 +283,19 @@ func TestPtyShell(t *testing.T) {
 		t.Fatalf("shell output missing: %q", out)
 	}
 }
+
+func TestInsideRoot(t *testing.T) {
+	cases := map[string]bool{
+		"a.go":        true,
+		"sub/a.go":    true,
+		"..foo":       true,
+		"..":          false,
+		"../x":        false,
+		"/etc/passwd": false,
+	}
+	for rel, want := range cases {
+		if got := insideRoot(rel); got != want {
+			t.Errorf("insideRoot(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}

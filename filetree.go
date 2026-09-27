@@ -24,7 +24,7 @@ var ignoredDirs = map[string]bool{".git": true, ".hg": true, ".svn": true, "node
 // FileTree is the lazily loaded project explorer.
 type FileTree struct {
 	app   *App
-	Root  *gtk.ScrolledWindow
+	Root  *gtk.Box
 	view  *gtk.TreeView
 	store *gtk.TreeStore
 }
@@ -68,9 +68,26 @@ func NewFileTree(app *App) *FileTree {
 	})
 	f.view.Connect("button-press-event", f.onButton)
 
-	f.Root, _ = gtk.ScrolledWindowNew(nil, nil)
-	f.Root.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
-	f.Root.Add(f.view)
+	sw, _ := gtk.ScrolledWindowNew(nil, nil)
+	sw.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+	sw.Add(f.view)
+
+	bar, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
+	mk := func(icon, tip string, fn func()) {
+		bt, _ := gtk.ButtonNewFromIconName(icon, gtk.ICON_SIZE_MENU)
+		bt.SetRelief(gtk.RELIEF_NONE)
+		bt.SetTooltipText(tip)
+		bt.Connect("clicked", fn)
+		bar.PackStart(bt, false, false, 0)
+	}
+	mk("document-new-symbolic", "New file (Ctrl+N)", func() { f.create(false) })
+	mk("folder-new-symbolic", "New folder (Ctrl+Shift+N)", func() { f.create(true) })
+	mk("view-refresh-symbolic", "Refresh", f.Reload)
+	mk("pan-up-symbolic", "Collapse all", f.view.CollapseAll)
+
+	f.Root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	f.Root.PackStart(bar, false, false, 0)
+	f.Root.PackStart(sw, true, true, 0)
 	return f
 }
 
@@ -84,10 +101,77 @@ func (f *FileTree) rowInfo(iter *gtk.TreeIter) (path string, isDir bool) {
 	return
 }
 
-// Reload rebuilds the tree from the project root.
+// Reload rebuilds the tree from the project root, keeping expanded folders open.
 func (f *FileTree) Reload() {
+	expanded := f.expandedDirs(nil, nil)
 	f.store.Clear()
 	f.fill(nil, f.app.root)
+	for _, p := range expanded {
+		if iter, ok := f.iterFor(p); ok {
+			if tp, err := f.store.GetPath(iter); err == nil {
+				f.view.ExpandRow(tp, false)
+			}
+		}
+	}
+}
+
+// expandedDirs lists the paths of expanded folders below parent, parents first.
+func (f *FileTree) expandedDirs(parent *gtk.TreeIter, out []string) []string {
+	var it gtk.TreeIter
+	for ok := f.store.IterChildren(parent, &it); ok; ok = f.store.IterNext(&it) {
+		p, isDir := f.rowInfo(&it)
+		if !isDir {
+			continue
+		}
+		if tp, err := f.store.GetPath(&it); err == nil && f.view.RowExpanded(tp) {
+			out = append(out, p)
+			out = f.expandedDirs(&it, out)
+		}
+	}
+	return out
+}
+
+// iterFor finds the row for p, expanding its ancestors so it is loaded.
+func (f *FileTree) iterFor(p string) (*gtk.TreeIter, bool) {
+	rel, err := filepath.Rel(f.app.root, p)
+	if err != nil || rel == "." || !insideRoot(rel) {
+		return nil, false
+	}
+	var parent *gtk.TreeIter
+	cur := f.app.root
+	for _, name := range strings.Split(rel, string(filepath.Separator)) {
+		if parent != nil {
+			if tp, err := f.store.GetPath(parent); err == nil {
+				f.view.ExpandRow(tp, false)
+			}
+		}
+		cur = filepath.Join(cur, name)
+		var it gtk.TreeIter
+		found := false
+		for ok := f.store.IterChildren(parent, &it); ok; ok = f.store.IterNext(&it) {
+			if rp, _ := f.rowInfo(&it); rp == cur {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, false
+		}
+		row := it
+		parent = &row
+	}
+	return parent, true
+}
+
+// reveal expands the tree down to p and selects it.
+func (f *FileTree) reveal(p string) {
+	iter, ok := f.iterFor(p)
+	if !ok {
+		return
+	}
+	if tp, err := f.store.GetPath(iter); err == nil {
+		f.view.SetCursor(tp, nil, false)
+	}
 }
 
 func (f *FileTree) fill(parent *gtk.TreeIter, dir string) {
@@ -171,6 +255,9 @@ func (f *FileTree) onButton(_ *gtk.TreeView, ev *gdk.Event) bool {
 	}
 	if path, _, _, _, ok := f.view.GetPathAtPos(int(b.X()), int(b.Y())); ok {
 		f.view.SetCursor(path, nil, false)
+	} else if sel, err := f.view.GetSelection(); err == nil {
+		// Clicked empty space: target the project root.
+		sel.UnselectAll()
 	}
 	menu, _ := gtk.MenuNew()
 	add := func(label string, fn func()) {
@@ -192,16 +279,21 @@ func (f *FileTree) create(dir bool) {
 		title = "New Folder"
 	}
 	base := f.selectedDir()
-	name, ok := f.app.prompt(title, "Name (relative to "+relPath(f.app.root, base)+"):", "")
-	if !ok || strings.TrimSpace(name) == "" {
+	name, ok := f.app.prompt(title, "Name (relative to "+relPath(f.app.root, base)+", may include subfolders):", "")
+	name = strings.TrimSpace(name)
+	if !ok || name == "" {
 		return
 	}
 	full := filepath.Join(base, name)
-	var err error
-	if dir {
-		err = os.MkdirAll(full, 0755)
-	} else {
-		if err = os.MkdirAll(filepath.Dir(full), 0755); err == nil {
+	if rel, err := filepath.Rel(f.app.root, full); err != nil || rel == "." || !insideRoot(rel) {
+		f.app.showError("Could not create "+name, "The path must be inside the project folder.")
+		return
+	}
+	err := os.MkdirAll(filepath.Dir(full), 0755)
+	if err == nil {
+		if dir {
+			err = os.Mkdir(full, 0755)
+		} else {
 			var fh *os.File
 			fh, err = os.OpenFile(full, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 			if err == nil {
@@ -214,9 +306,15 @@ func (f *FileTree) create(dir bool) {
 		return
 	}
 	f.Reload()
+	f.reveal(full)
 	if !dir {
 		f.app.editors.Open(full)
 	}
+}
+
+// insideRoot reports whether a path relative to the project root stays inside it.
+func insideRoot(rel string) bool {
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func relPath(root, p string) string {
