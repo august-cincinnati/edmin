@@ -51,8 +51,9 @@ func setPtySize(f *os.File, rows, cols int) error {
 	return ioctl(f.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws)))
 }
 
-// startShell launches the user's shell attached to a new pty in dir.
-func startShell(dir string, rows, cols int) (*os.File, *exec.Cmd, error) {
+// startShell launches argv (the user's shell if empty) attached to a new pty
+// in dir.
+func startShell(dir string, argv []string, rows, cols int) (*os.File, *exec.Cmd, error) {
 	master, slave, err := openPty()
 	if err != nil {
 		return nil, nil, err
@@ -60,11 +61,10 @@ func startShell(dir string, rows, cols int) (*os.File, *exec.Cmd, error) {
 	defer slave.Close()
 	setPtySize(master, rows, cols)
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	if len(argv) == 0 {
+		argv = defaultShell()
 	}
-	cmd := exec.Command(shell)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave

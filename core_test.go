@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -264,7 +265,7 @@ func TestWordRefs(t *testing.T) {
 }
 
 func TestPtyShell(t *testing.T) {
-	master, cmd, err := startShell(t.TempDir(), 24, 80)
+	master, cmd, err := startShell(t.TempDir(), nil, 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,6 +297,69 @@ func TestInsideRoot(t *testing.T) {
 	for rel, want := range cases {
 		if got := insideRoot(rel); got != want {
 			t.Errorf("insideRoot(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
+func TestPtyCustomShell(t *testing.T) {
+	master, cmd, err := startShell(t.TempDir(), []string{"/bin/sh", "-c", "echo EDMIN_$((40+2))"}, 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	var out []byte
+	buf := make([]byte, 4096)
+	for !strings.Contains(string(out), "EDMIN_42") {
+		n, err := master.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	if !strings.Contains(string(out), "EDMIN_42") {
+		t.Fatalf("custom shell output missing: %q", out)
+	}
+}
+
+const testMountinfo = `22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw
+40 22 0:35 / /mnt/c rw,noatime - 9p C:\134 rw,dirsync,aname=drvfs;path=C:\;uid=1000
+41 22 0:36 / /mnt/work rw,noatime - drvfs D:\134 rw
+50 22 0:40 / /home/me/remote rw,nosuid shared:2 - fuse.sshfs me@build-box:/srv rw,user_id=1000
+51 50 0:41 / /home/me/remote/nested\040dir rw - fuse.sshfs deploy@[fe80::1]: rw
+52 22 0:42 / /home/me/home\040box rw - fuse.sshfs pi@raspberrypi:code rw
+`
+
+func TestDetectShell(t *testing.T) {
+	found := func(name string) (string, error) {
+		if name == "powershell.exe" {
+			return "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe", nil
+		}
+		return "", os.ErrNotExist
+	}
+	wsl := shellEnv{inWSL: true, mountinfo: testMountinfo, lookPath: found}
+	linux := shellEnv{mountinfo: testMountinfo, lookPath: found}
+	ps := []string{"/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe", "-NoLogo"}
+	cases := []struct {
+		root string
+		env  shellEnv
+		want []string
+	}{
+		{"/mnt/c/Users/me/proj", wsl, ps},
+		{"/mnt/c", wsl, ps},
+		{"/mnt/work/app", wsl, ps}, // drvfs mounted outside /mnt/<letter>
+		{"/mnt/c/Users/me/proj", linux, nil},
+		{"/mnt/cdrom/x", wsl, nil},
+		{"/home/me/proj", wsl, nil},
+		{"/home/me/remote", linux, []string{"ssh", "-t", "me@build-box", "cd '/srv' && exec $SHELL -l"}},
+		{"/home/me/remote/app/it's", linux, []string{"ssh", "-t", "me@build-box", `cd '/srv/app/it'\''s' && exec $SHELL -l`}},
+		{"/home/me/remote/nested dir/x", linux, []string{"ssh", "-t", "deploy@fe80::1", "cd 'x' && exec $SHELL -l"}},
+		{"/home/me/home box", wsl, []string{"ssh", "-t", "pi@raspberrypi", "cd 'code' && exec $SHELL -l"}},
+		{"/home/me/remotely", linux, nil},
+	}
+	for _, c := range cases {
+		got := detectShell(c.root, c.env)
+		if strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
+			t.Errorf("detectShell(%q, wsl=%v) = %q, want %q", c.root, c.env.inWSL, got, c.want)
 		}
 	}
 }

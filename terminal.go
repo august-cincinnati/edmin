@@ -34,12 +34,14 @@ type Terminal struct {
 	closed       atomic.Bool
 	onExit       func()
 	theme        *Theme
+	shell        []string
 	sbLines      int  // scrollback lines currently in the buffer
 	follow       bool // keep the view pinned to the bottom
 }
 
-func NewTerminal(dir string, theme *Theme, onExit func()) *Terminal {
-	t := &Terminal{dir: dir, theme: theme, onExit: onExit, tags: map[attr]*gtk.TextTag{}}
+// NewTerminal runs shell (the user's shell if empty) in dir.
+func NewTerminal(dir string, shell []string, theme *Theme, onExit func()) *Terminal {
+	t := &Terminal{dir: dir, shell: shell, theme: theme, onExit: onExit, tags: map[attr]*gtk.TextTag{}}
 	t.Root, _ = gtk.ScrolledWindowNew(nil, nil)
 	t.Root.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_ALWAYS)
 	t.view, _ = gtk.TextViewNew()
@@ -123,9 +125,13 @@ func (t *Terminal) start(rows, cols int) {
 	t.vt = NewVT(rows, cols)
 	t.vt.Reply = func(b []byte) { t.pty.Write(b) }
 	t.buf.SetText("")
-	pty, cmd, err := startShell(t.dir, rows, cols)
+	pty, cmd, err := startShell(t.dir, t.shell, rows, cols)
 	if err != nil {
-		t.buf.SetText("failed to start shell: " + err.Error())
+		shell := t.shell
+		if len(shell) == 0 {
+			shell = defaultShell()
+		}
+		t.buf.SetText("failed to start " + strings.Join(shell, " ") + ": " + err.Error())
 		return
 	}
 	t.pty, t.cmd = pty, cmd

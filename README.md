@@ -34,7 +34,8 @@ dependencies; everything else, including the terminal emulator, is plain Go.
   that window only, so different projects can look different. The choice is
   saved for the project in `.edmin/settings.json`, and in
   `~/.config/edmin/settings.json` as the default for projects without one.
-- **Terminals** in tabs along the bottom. Each runs your `$SHELL` through a
+- **Terminals** in tabs along the bottom. Each runs the project's shell
+  (see [Terminal shells](#terminal-shells)) through a
   pseudo-terminal and a built-in xterm-compatible emulator that supports
   colors, scrollback, and full-screen programs such as `vim` and `less`.
 - **Build panel** on the right for saving named shell commands.
@@ -173,6 +174,32 @@ order. When the project opens again, EdMin opens one terminal for each saved
 name. Only the names are kept, not the shell sessions. Closing a renamed tab
 removes it from the list.
 
+## Terminal shells
+
+Each project's terminals run a shell picked in this order:
+
+1. **The project's `"shell"` setting** in `.edmin/settings.json`, as a list of
+   arguments:
+
+   ```json
+   { "shell": ["ssh", "-t", "-p", "2222", "me@build-box", "cd /srv/app && exec $SHELL -l"] }
+   ```
+
+2. **Detected from where the project lives:**
+   - Inside WSL, a project on a Windows drive (`/mnt/c/...`, or any other
+     drvfs mount) gets PowerShell: `pwsh.exe` if it is installed, otherwise
+     `powershell.exe`. It starts in the matching Windows folder.
+   - A project on an sshfs mount gets `ssh -t [user@]host`, with a login
+     shell in the same folder on the remote machine. The host comes from the
+     mount's source, so aliases in `~/.ssh/config` work. The mount's port
+     setting isn't visible to EdMin, so use the `"shell"` setting for a
+     non-standard port, as in the example above.
+3. **Your `$SHELL`**, or `/bin/sh` if it isn't set.
+
+Hover over a terminal tab to see the command it runs. Build commands are
+typed into that shell, so commands written for bash won't work in
+PowerShell.
+
 ## Build commands
 
 Build commands are saved per project in `.edmin/commands.json`:
@@ -202,6 +229,7 @@ buttons.
 | `terminal.go` | Terminal widget (rendering and keyboard input)            |
 | `vt.go`       | VT100/xterm screen emulator (no GTK code)                 |
 | `pty.go`      | Pseudo-terminal support using Linux ioctls                |
+| `shell.go`    | Choosing each project's terminal shell (WSL, sshfs)     |
 | `util.go`     | Word-based fallbacks for files without a grammar          |
 
 ## Testing

@@ -18,6 +18,7 @@ type App struct {
 	win   *gtk.Window
 	root  string
 	theme *Theme
+	shell []string // what the project's terminals run; nil means $SHELL
 
 	editors *EditorArea
 	tree    *FileTree
@@ -237,6 +238,7 @@ func (a *App) setRoot(root string) {
 	a.root = root
 	saveSession()
 	a.setTheme(projectTheme(root))
+	a.shell = projectShell(root)
 	a.tree.Reload()
 	a.build.Load()
 	a.updateTitle()
@@ -290,10 +292,15 @@ func (a *App) newTerminal() *Terminal { return a.newNamedTerminal("") }
 func (a *App) newNamedTerminal(name string) *Terminal {
 	a.termCount++
 	var t *Terminal
-	t = NewTerminal(a.root, a.theme, func() { a.closeTerminal(t) })
+	t = NewTerminal(a.root, a.shell, a.theme, func() { a.closeTerminal(t) })
 	tab, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 4)
 	lbl, _ := gtk.LabelNew(fmt.Sprintf("Terminal %d", a.termCount))
 	lblBox := renamableLabel(lbl, a.saveTerminals)
+	shell := a.shell
+	if len(shell) == 0 {
+		shell = defaultShell()
+	}
+	tab.SetTooltipText("Runs: " + strings.Join(shell, " ") + "\nDouble-click the name to rename")
 	if name != "" {
 		lbl.SetText(name)
 		lblBox.custom = true

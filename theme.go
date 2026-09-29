@@ -189,6 +189,9 @@ func (a *App) setTheme(t *Theme) {
 
 type Settings struct {
 	Theme string `json:"theme,omitempty"`
+	// Shell is the command a project's terminals run, as a list of
+	// arguments. Only used in the project file; empty means detect it.
+	Shell []string `json:"shell,omitempty"`
 	// Open lists the project folders open in windows, reopened when EdMin
 	// starts without arguments. Only used in the user-wide file.
 	Open []string `json:"open,omitempty"`
@@ -272,7 +275,9 @@ func (a *App) showSettings() {
 			a.setTheme(t)
 			a.themed(d)
 			// Remember it for this project, and as the default for new ones.
-			err := saveSettings(projectSettingsPath(a.root), Settings{Theme: t.Name})
+			ps := loadSettings(projectSettingsPath(a.root))
+			ps.Theme = t.Name
+			err := saveSettings(projectSettingsPath(a.root), ps)
 			if err == nil {
 				s := loadSettings(settingsPath())
 				s.Theme = t.Name
