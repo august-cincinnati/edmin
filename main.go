@@ -43,6 +43,10 @@ type App struct {
 // apps holds every open window; the program exits when the last one closes.
 var apps []*App
 
+// quitting is set while every window is being closed at once, so the session
+// keeps listing all of their projects.
+var quitting bool
+
 func main() {
 	args, wait := parseArgs(os.Args[1:])
 	detached := os.Getenv(detachedEnv) != ""
@@ -137,7 +141,7 @@ func newApp(root string) *App {
 func (a *App) buildUI() {
 	a.win, _ = gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
 	a.win.SetDefaultSize(1300, 850)
-	a.win.Connect("delete-event", func() bool { return !a.confirmQuit() })
+	a.win.Connect("delete-event", func() bool { return !a.onClose() })
 	a.win.Connect("destroy", func() {
 		for _, t := range a.terminals {
 			t.Close()
@@ -152,7 +156,7 @@ func (a *App) buildUI() {
 			// The last window closing ends the session; keep its list so the
 			// same projects reopen next time.
 			gtk.MainQuit()
-		} else {
+		} else if !quitting {
 			saveSession()
 		}
 	})
@@ -770,6 +774,55 @@ func (a *App) confirmQuit() bool {
 		case gtk.RESPONSE_NO:
 		default:
 			return false
+		}
+	}
+	return true
+}
+
+// onClose handles the window's close button. With other windows open it asks
+// whether to close just this one or all of them. It reports whether this
+// window should close.
+func (a *App) onClose() bool {
+	if len(apps) < 2 {
+		return a.confirmQuit()
+	}
+	d := gtk.MessageDialogNew(a.win, gtk.DIALOG_MODAL, gtk.MESSAGE_QUESTION, gtk.BUTTONS_NONE,
+		"Close all windows or just this one?")
+	a.themed(d)
+	d.FormatSecondaryText("%d EdMin windows are open.", len(apps))
+	d.AddButton("Cancel", gtk.RESPONSE_CANCEL)
+	d.AddButton("Close All Windows", gtk.RESPONSE_ACCEPT)
+	d.AddButton("Close This Window", gtk.RESPONSE_CLOSE)
+	d.SetDefaultResponse(gtk.RESPONSE_CLOSE)
+	r := d.Run()
+	d.Destroy()
+	switch r {
+	case gtk.RESPONSE_CLOSE:
+		return a.confirmQuit()
+	case gtk.RESPONSE_ACCEPT:
+		return a.closeAll()
+	}
+	return false
+}
+
+// closeAll closes every window, first offering to save each one's unsaved
+// files; cancelling any of those leaves all windows open. It reports whether
+// a (the window being closed by its close button) should close.
+func (a *App) closeAll() bool {
+	for _, x := range apps {
+		if len(x.editors.Unsaved()) > 0 {
+			x.win.Present()
+		}
+		if !x.confirmQuit() {
+			return false
+		}
+	}
+	// Record every project now, so they all reopen next time.
+	saveSession()
+	quitting = true
+	for _, x := range append([]*App(nil), apps...) {
+		if x != a {
+			x.win.Destroy()
 		}
 	}
 	return true
