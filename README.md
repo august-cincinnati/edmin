@@ -129,7 +129,12 @@ few minutes. Later builds are fast.
 ./edmin path/to/project # open a folder
 ./edmin path/to/file.go # open a file (its folder becomes the project)
 ./edmin proj-a proj-b   # open each project in its own window
+./edmin --wait file.txt # stay in the foreground until EdMin closes
 ```
+
+Run from a terminal, EdMin starts itself in the background and gives the
+prompt back straight away. Use `--wait` (or `-w`) to keep it in the foreground,
+for example to see its error output.
 
 Use the folder button in the header bar, or `Ctrl+O`, to switch projects.
 To work on several projects at once, use the new-window button next to it, or

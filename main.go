@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
@@ -42,9 +44,15 @@ type App struct {
 var apps []*App
 
 func main() {
+	args, wait := parseArgs(os.Args[1:])
+	detached := os.Getenv(detachedEnv) != ""
+	// Don't pass the marker on to shells started in EdMin's terminals.
+	os.Unsetenv(detachedEnv)
+	if !wait && !detached && fromTerminal() && detach(args) {
+		return
+	}
 	gtk.Init(nil)
 	loadThemeCSS()
-	args := os.Args[1:]
 	if len(args) == 0 {
 		// Reopen the projects from last time, or else the current directory.
 		for _, p := range loadSettings(settingsPath()).Open {
@@ -74,6 +82,46 @@ func main() {
 		}
 	}
 	gtk.Main()
+}
+
+// detachedEnv marks the background copy started by detach.
+const detachedEnv = "EDMIN_DETACHED"
+
+// parseArgs removes the --wait (-w) flag from args.
+func parseArgs(in []string) (args []string, wait bool) {
+	for _, a := range in {
+		if a == "--wait" || a == "-w" {
+			wait = true
+		} else {
+			args = append(args, a)
+		}
+	}
+	return args, wait
+}
+
+// fromTerminal reports whether EdMin was started from an interactive shell.
+func fromTerminal() bool {
+	st, err := os.Stdin.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+// detach restarts EdMin in its own session, disconnected from the terminal,
+// so the shell prompt returns straight away. It reports whether that worked;
+// if not, EdMin just runs in the foreground.
+func detach(args []string) bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Env = append(os.Environ(), detachedEnv+"=1")
+	// Stdin, stdout and stderr are left nil, so they go to /dev/null.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+	cmd.Process.Release()
+	return true
 }
 
 // newApp opens a new window with root as its project folder.
