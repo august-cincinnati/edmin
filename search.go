@@ -258,7 +258,7 @@ func (s *SearchPanel) show(status string, results []match, needle string) {
 		s.store.SetValue(di, srCol, 0)
 		for _, m := range defs {
 			ci := s.store.Append(di)
-			s.store.SetValue(ci, srMarkup, "<small>"+html.EscapeString(relPath(s.app.root, m.path))+"</small> "+matchMarkup(m, needle))
+			s.store.SetValue(ci, srMarkup, "<small>"+html.EscapeString(relPath(s.app.root, m.path))+"</small> "+matchMarkup(s.app.theme, m, needle))
 			s.store.SetValue(ci, srPath, m.path)
 			s.store.SetValue(ci, srLine, m.line)
 			s.store.SetValue(ci, srCol, m.colByte)
@@ -285,7 +285,7 @@ func (s *SearchPanel) show(status string, results []match, needle string) {
 		s.store.SetValue(fi, srCol, 0)
 		for _, m := range ms {
 			ci := s.store.Append(fi)
-			s.store.SetValue(ci, srMarkup, matchMarkup(m, needle))
+			s.store.SetValue(ci, srMarkup, matchMarkup(s.app.theme, m, needle))
 			s.store.SetValue(ci, srPath, m.path)
 			s.store.SetValue(ci, srLine, m.line)
 			s.store.SetValue(ci, srCol, m.colByte)
@@ -296,14 +296,14 @@ func (s *SearchPanel) show(status string, results []match, needle string) {
 	}
 }
 
-// restyle redraws the current results in the active theme's colours.
+// restyle redraws the current results in the window's theme colours.
 func (s *SearchPanel) restyle() {
 	if s.lastResults != nil {
 		s.show(s.lastStatus, s.lastResults, s.lastNeedle)
 	}
 }
 
-func matchMarkup(m match, needle string) string {
+func matchMarkup(theme *Theme, m match, needle string) string {
 	text := strings.TrimLeft(m.text, " \t")
 	trimmed := len(m.text) - len(text)
 	if len(text) > 200 {

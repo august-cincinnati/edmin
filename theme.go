@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
@@ -13,7 +14,6 @@ import (
 // Theme holds every colour EdMin draws with.
 type Theme struct {
 	Name string
-	Dark bool // ask GTK for its dark widget variant
 
 	BG, FG    string // editor and list surfaces
 	Panel     string // window chrome: header bar, tabs, status bar
@@ -41,7 +41,7 @@ var themes = []*Theme{
 		},
 	},
 	{
-		Name: "Dark", Dark: true, BG: "#1e1e1e", FG: "#d4d4d4", Panel: "#252526", Border: "#3c3c3c", Hover: "#2f3033",
+		Name: "Dark", BG: "#1e1e1e", FG: "#d4d4d4", Panel: "#252526", Border: "#3c3c3c", Hover: "#2f3033",
 		Selection: "#264f78", Dim: "#858585", MatchBG: "#9e6a03", MatchFG: "#ffffff", JumpLine: "#2a3550",
 		TermBG: "#181818", TermFG: "#d4d4d4", DefMarker: "#4ec9b0",
 		Syntax: map[string]string{
@@ -59,7 +59,7 @@ var themes = []*Theme{
 		},
 	},
 	{
-		Name: "Solarized Dark", Dark: true, BG: "#002b36", FG: "#93a1a1", Panel: "#073642", Border: "#0e4b59", Hover: "#0a4250",
+		Name: "Solarized Dark", BG: "#002b36", FG: "#93a1a1", Panel: "#073642", Border: "#0e4b59", Hover: "#0a4250",
 		Selection: "#11505f", Dim: "#657b83", MatchBG: "#b58900", MatchFG: "#002b36", JumpLine: "#0b3d49",
 		TermBG: "#002b36", TermFG: "#93a1a1", DefMarker: "#2aa198",
 		Syntax: map[string]string{
@@ -68,9 +68,6 @@ var themes = []*Theme{
 		},
 	},
 }
-
-// theme is the active theme.
-var theme = themes[0]
 
 func themeByName(name string) *Theme {
 	for _, t := range themes {
@@ -102,43 +99,103 @@ button:hover { background-color: %[5]s; }
 button:checked, button:active { background-color: %[6]s; }
 checkbutton, radiobutton, label { color: %[2]s; }
 #edmin-terminal, #edmin-terminal text, #edmin-terminal border { background-color: %[7]s; color: %[8]s; }
-`, t.BG, t.FG, t.Panel, t.Border, t.Hover, t.Selection, t.TermBG, t.TermFG)
+textview text, entry { caret-color: %[2]s; }
+scrollbar, scrollbar trough { background-color: %[3]s; border-color: %[4]s; }
+scrollbar slider { background-color: %[9]s; }
+scrollbar slider:hover { background-color: %[2]s; }
+`, t.BG, t.FG, t.Panel, t.Border, t.Hover, t.Selection, t.TermBG, t.TermFG, t.Dim)
 }
 
-var themeCSS *gtk.CssProvider
-
-// applyTheme makes t the active theme and restyles everything already open.
-func (a *App) applyTheme(t *Theme) {
-	theme = t
-	if s, err := gtk.SettingsGetDefault(); err == nil {
-		s.SetProperty("gtk-application-prefer-dark-theme", t.Dark)
-	}
-	screen, _ := gdk.ScreenGetDefault()
-	if themeCSS != nil {
-		gtk.RemoveProviderForScreen(screen, themeCSS)
-	}
-	themeCSS, _ = gtk.CssProviderNew()
-	themeCSS.LoadFromData(t.css())
-	gtk.AddProviderForScreen(screen, themeCSS, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-	if a.editors != nil {
-		for _, e := range a.editors.editors {
-			e.styleTags()
+// cssClass is the style class that scopes t's CSS to the windows using it.
+func (t *Theme) cssClass() string {
+	for i, x := range themes {
+		if x == t {
+			return fmt.Sprintf("edmin-theme-%d", i)
 		}
 	}
+	return ""
+}
+
+// scopedCSS returns t's CSS with every selector limited to toplevels (windows,
+// dialogs, menus) carrying t's style class, so each window can use its own
+// theme.
+func (t *Theme) scopedCSS() string {
+	cls := t.cssClass()
+	var b strings.Builder
+	for _, rule := range strings.SplitAfter(t.css(), "}") {
+		sels, body, ok := strings.Cut(rule, "{")
+		if !ok {
+			continue
+		}
+		var scoped []string
+		for _, sel := range strings.Split(sels, ",") {
+			sel = strings.TrimSpace(sel)
+			if rest, isWin := strings.CutPrefix(sel, "window"); isWin {
+				scoped = append(scoped, "window."+cls+rest)
+			} else {
+				scoped = append(scoped, "."+cls+" "+sel)
+			}
+		}
+		b.WriteString(strings.Join(scoped, ", ") + " {" + body + "\n")
+	}
+	return b.String()
+}
+
+// loadThemeCSS installs the CSS for every theme once; windows pick theirs
+// through a style class.
+func loadThemeCSS() {
+	var css strings.Builder
+	for _, t := range themes {
+		css.WriteString(t.scopedCSS())
+	}
+	p, _ := gtk.CssProviderNew()
+	p.LoadFromData(css.String())
+	screen, _ := gdk.ScreenGetDefault()
+	gtk.AddProviderForScreen(screen, p, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+}
+
+// styled is any widget with a style context: windows, dialogs, menus.
+type styled interface {
+	GetStyleContext() (*gtk.StyleContext, error)
+}
+
+// themed gives a toplevel (the window, or one of its dialogs or menus) the
+// window's theme.
+func (a *App) themed(w styled) {
+	sc, err := w.GetStyleContext()
+	if err != nil {
+		return
+	}
+	for _, t := range themes {
+		sc.RemoveClass(t.cssClass())
+	}
+	sc.AddClass(a.theme.cssClass())
+}
+
+// setTheme switches this window to t and restyles everything open in it.
+func (a *App) setTheme(t *Theme) {
+	a.theme = t
+	a.themed(a.win)
+	for _, e := range a.editors.editors {
+		e.styleTags()
+	}
 	for _, term := range a.terminals {
-		term.restyle()
+		term.restyle(t)
 	}
-	if a.search != nil {
-		a.search.restyle()
-	}
+	a.search.restyle()
 }
 
 // ---- Persisted settings ----
 
 type Settings struct {
-	Theme string `json:"theme"`
+	Theme string `json:"theme,omitempty"`
+	// Open lists the project folders open in windows, reopened when EdMin
+	// starts without arguments. Only used in the user-wide file.
+	Open []string `json:"open,omitempty"`
 }
 
+// settingsPath is the user-wide settings file. Its theme is the default for
+// projects that haven't chosen their own.
 func settingsPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -147,9 +204,14 @@ func settingsPath() string {
 	return filepath.Join(dir, "edmin", "settings.json")
 }
 
-func loadSettings() Settings {
+// projectSettingsPath holds the theme chosen for one project.
+func projectSettingsPath(root string) string {
+	return filepath.Join(root, ".edmin", "settings.json")
+}
+
+func loadSettings(p string) Settings {
 	var s Settings
-	if p := settingsPath(); p != "" {
+	if p != "" {
 		if data, err := os.ReadFile(p); err == nil {
 			json.Unmarshal(data, &s)
 		}
@@ -157,8 +219,15 @@ func loadSettings() Settings {
 	return s
 }
 
-func saveSettings(s Settings) error {
-	p := settingsPath()
+// projectTheme is the theme saved for root, or else the user's default.
+func projectTheme(root string) *Theme {
+	if s := loadSettings(projectSettingsPath(root)); s.Theme != "" {
+		return themeByName(s.Theme)
+	}
+	return themeByName(loadSettings(settingsPath()).Theme)
+}
+
+func saveSettings(p string, s Settings) error {
 	if p == "" {
 		return fmt.Errorf("no user config directory")
 	}
@@ -175,6 +244,7 @@ func (a *App) showSettings() {
 	d, _ := gtk.DialogNewWithButtons("Settings", a.win, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
 		[]interface{}{"Close", gtk.RESPONSE_CLOSE})
 	d.SetDefaultSize(320, -1)
+	a.themed(d)
 	box, _ := d.GetContentArea()
 	box.SetSpacing(6)
 	box.SetMarginStart(16)
@@ -183,7 +253,7 @@ func (a *App) showSettings() {
 	box.SetMarginBottom(12)
 
 	head, _ := gtk.LabelNew("")
-	head.SetMarkup("<b>Theme</b>")
+	head.SetMarkup("<b>Theme</b> <small>(this window)</small>")
 	head.SetXAlign(0)
 	box.PackStart(head, false, false, 0)
 
@@ -194,13 +264,21 @@ func (a *App) showSettings() {
 		if group == nil {
 			group = rb
 		}
-		rb.SetActive(t == theme)
+		rb.SetActive(t == a.theme)
 		rb.Connect("toggled", func() {
-			if !rb.GetActive() || t == theme {
+			if !rb.GetActive() || t == a.theme {
 				return
 			}
-			a.applyTheme(t)
-			if err := saveSettings(Settings{Theme: t.Name}); err != nil {
+			a.setTheme(t)
+			a.themed(d)
+			// Remember it for this project, and as the default for new ones.
+			err := saveSettings(projectSettingsPath(a.root), Settings{Theme: t.Name})
+			if err == nil {
+				s := loadSettings(settingsPath())
+				s.Theme = t.Name
+				err = saveSettings(settingsPath(), s)
+			}
+			if err != nil {
 				a.setStatusMsg("Could not save settings: " + err.Error())
 			}
 		})

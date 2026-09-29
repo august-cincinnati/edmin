@@ -72,23 +72,28 @@ func NewFileTree(app *App) *FileTree {
 	sw.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
 	sw.Add(f.view)
 
+	f.Root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	f.Root.PackStart(sw, true, true, 0)
+	return f
+}
+
+// Toolbar returns the explorer's buttons, for the window's header bar.
+func (f *FileTree) Toolbar() *gtk.Box {
 	bar, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
 	mk := func(icon, tip string, fn func()) {
-		bt, _ := gtk.ButtonNewFromIconName(icon, gtk.ICON_SIZE_MENU)
-		bt.SetRelief(gtk.RELIEF_NONE)
+		bt, _ := gtk.ButtonNewFromIconName(icon, gtk.ICON_SIZE_BUTTON)
 		bt.SetTooltipText(tip)
 		bt.Connect("clicked", fn)
 		bar.PackStart(bt, false, false, 0)
 	}
-	mk("document-new-symbolic", "New file (Ctrl+N)", func() { f.create(false) })
-	mk("folder-new-symbolic", "New folder (Ctrl+Shift+N)", func() { f.create(true) })
-	mk("view-refresh-symbolic", "Refresh", f.Reload)
-	mk("pan-up-symbolic", "Collapse all", f.view.CollapseAll)
-
-	f.Root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
-	f.Root.PackStart(bar, false, false, 0)
-	f.Root.PackStart(sw, true, true, 0)
-	return f
+	mk("document-new-symbolic", "New file (Ctrl+N)", func() { f.app.showExplorer(); f.create(false) })
+	mk("folder-new-symbolic", "New folder (Ctrl+Shift+N)", func() { f.app.showExplorer(); f.create(true) })
+	mk("view-refresh-symbolic", "Refresh file tree", f.Reload)
+	mk("pan-up-symbolic", "Collapse all folders", f.view.CollapseAll)
+	if sc, err := bar.GetStyleContext(); err == nil {
+		sc.AddClass("linked")
+	}
+	return bar
 }
 
 func (f *FileTree) rowInfo(iter *gtk.TreeIter) (path string, isDir bool) {
@@ -269,6 +274,11 @@ func (f *FileTree) onButton(_ *gtk.TreeView, ev *gdk.Event) bool {
 	add("New Folder…", func() { f.create(true) })
 	add("Refresh", f.Reload)
 	menu.ShowAll()
+	if top, err := menu.GetToplevel(); err == nil {
+		if w, ok := top.(*gtk.Window); ok {
+			f.app.themed(w)
+		}
+	}
 	menu.PopupAtPointer(ev)
 	return true
 }

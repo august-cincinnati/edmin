@@ -2,10 +2,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
@@ -13,8 +15,9 @@ import (
 )
 
 type App struct {
-	win  *gtk.Window
-	root string
+	win   *gtk.Window
+	root  string
+	theme *Theme
 
 	editors *EditorArea
 	tree    *FileTree
@@ -27,32 +30,59 @@ type App struct {
 	termNB     *gtk.Notebook
 	terminals  []*Terminal
 	termCount  int
+	termLabels map[*Terminal]*renamable
 
 	status *gtk.Label
 
 	leftBtn, termBtn, buildBtn *gtk.ToggleButton
 }
 
+// apps holds every open window; the program exits when the last one closes.
+var apps []*App
+
 func main() {
 	gtk.Init(nil)
-	root, _ := os.Getwd()
-	var openFile string
-	if len(os.Args) > 1 {
-		p, _ := filepath.Abs(os.Args[1])
+	loadThemeCSS()
+	args := os.Args[1:]
+	if len(args) == 0 {
+		// Reopen the projects from last time, or else the current directory.
+		for _, p := range loadSettings(settingsPath()).Open {
+			if st, err := os.Stat(p); err == nil && st.IsDir() {
+				args = append(args, p)
+			}
+		}
+	}
+	if len(args) == 0 {
+		cwd, _ := os.Getwd()
+		args = []string{cwd}
+	}
+	// Each argument (a folder or a file) opens in its own window.
+	for _, arg := range args {
+		root, _ := os.Getwd()
+		var openFile string
+		p, _ := filepath.Abs(arg)
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			openFile = p
 			root = filepath.Dir(p)
 		} else if err == nil {
 			root = p
 		}
-	}
-	app := &App{root: root}
-	app.buildUI()
-	app.setRoot(root)
-	if openFile != "" {
-		app.editors.Open(openFile)
+		app := newApp(root)
+		if openFile != "" {
+			app.editors.Open(openFile)
+		}
 	}
 	gtk.Main()
+}
+
+// newApp opens a new window with root as its project folder.
+func newApp(root string) *App {
+	app := &App{root: root, theme: projectTheme(root)}
+	apps = append(apps, app)
+	app.buildUI()
+	app.setRoot(root)
+	app.restoreTerminals()
+	return app
 }
 
 func (a *App) buildUI() {
@@ -63,10 +93,21 @@ func (a *App) buildUI() {
 		for _, t := range a.terminals {
 			t.Close()
 		}
-		gtk.MainQuit()
+		for i, x := range apps {
+			if x == a {
+				apps = append(apps[:i], apps[i+1:]...)
+				break
+			}
+		}
+		if len(apps) == 0 {
+			// The last window closing ends the session; keep its list so the
+			// same projects reopen next time.
+			gtk.MainQuit()
+		} else {
+			saveSession()
+		}
 	})
 	a.win.Connect("key-press-event", a.onKey)
-	a.applyTheme(themeByName(loadSettings().Theme))
 
 	a.editors = NewEditorArea(a)
 	a.tree = NewFileTree(a)
@@ -81,6 +122,11 @@ func (a *App) buildUI() {
 	openBtn.SetTooltipText("Open folder (Ctrl+O)")
 	openBtn.Connect("clicked", a.openFolder)
 	hb.PackStart(openBtn)
+	newWinBtn, _ := gtk.ButtonNewFromIconName("window-new-symbolic", gtk.ICON_SIZE_BUTTON)
+	newWinBtn.SetTooltipText("Open folder in new window (Ctrl+Shift+O)")
+	newWinBtn.Connect("clicked", a.openFolderInNewWindow)
+	hb.PackStart(newWinBtn)
+	hb.PackStart(a.tree.Toolbar())
 	settingsBtn, _ := gtk.ButtonNewFromIconName("open-menu-symbolic", gtk.ICON_SIZE_BUTTON)
 	settingsBtn.SetTooltipText("Settings (Ctrl+,)")
 	settingsBtn.Connect("clicked", a.showSettings)
@@ -118,6 +164,7 @@ func (a *App) buildUI() {
 	newTerm.Connect("clicked", func() { a.newTerminal() })
 	newTerm.Show()
 	a.termNB.SetActionWidget(newTerm, gtk.PACK_END)
+	a.termNB.Connect("page-reordered", a.saveTerminals)
 	a.termPanel.PackStart(a.termNB, true, true, 0)
 
 	// Right: build commands.
@@ -170,11 +217,26 @@ func (a *App) buildUI() {
 			}
 		}
 	})
-	a.newTerminal()
+}
+
+// saveSession records the project folders open in windows.
+func saveSession() {
+	s := loadSettings(settingsPath())
+	s.Open = nil
+	seen := map[string]bool{}
+	for _, a := range apps {
+		if !seen[a.root] {
+			seen[a.root] = true
+			s.Open = append(s.Open, a.root)
+		}
+	}
+	saveSettings(settingsPath(), s)
 }
 
 func (a *App) setRoot(root string) {
 	a.root = root
+	saveSession()
+	a.setTheme(projectTheme(root))
 	a.tree.Reload()
 	a.build.Load()
 	a.updateTitle()
@@ -214,21 +276,40 @@ func (a *App) updateStatus() {
 
 func (a *App) setStatusMsg(msg string) { a.status.SetText(msg) }
 
+// showExplorer opens the left panel on its Files tab.
+func (a *App) showExplorer() {
+	a.leftBtn.SetActive(true)
+	a.leftPanel.SetCurrentPage(0)
+}
+
 // ---- Terminals ----
 
-func (a *App) newTerminal() *Terminal {
+func (a *App) newTerminal() *Terminal { return a.newNamedTerminal("") }
+
+// newNamedTerminal opens a terminal tab; an empty name gets "Terminal N".
+func (a *App) newNamedTerminal(name string) *Terminal {
 	a.termCount++
 	var t *Terminal
-	t = NewTerminal(a.root, func() { a.closeTerminal(t) })
+	t = NewTerminal(a.root, a.theme, func() { a.closeTerminal(t) })
 	tab, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 4)
 	lbl, _ := gtk.LabelNew(fmt.Sprintf("Terminal %d", a.termCount))
+	lblBox := renamableLabel(lbl, a.saveTerminals)
+	if name != "" {
+		lbl.SetText(name)
+		lblBox.custom = true
+	}
+	if a.termLabels == nil {
+		a.termLabels = map[*Terminal]*renamable{}
+	}
+	a.termLabels[t] = lblBox
 	cb, _ := gtk.ButtonNewFromIconName("window-close-symbolic", gtk.ICON_SIZE_MENU)
 	cb.SetRelief(gtk.RELIEF_NONE)
 	cb.SetFocusOnClick(false)
 	cb.Connect("clicked", func() { a.closeTerminal(t) })
-	tab.PackStart(lbl, false, false, 0)
+	tab.PackStart(lblBox, false, false, 0)
 	tab.PackStart(cb, false, false, 0)
 	tab.ShowAll()
+	lblBox.finishShow()
 	t.Root.ShowAll()
 	a.terminals = append(a.terminals, t)
 	n := a.termNB.AppendPage(t.Root, tab)
@@ -241,17 +322,143 @@ func (a *App) newTerminal() *Terminal {
 	return t
 }
 
+// renamable is a tab label that turns into a text entry when double-clicked.
+type renamable struct {
+	*gtk.Box
+	lbl    *gtk.Label
+	ent    *gtk.Entry
+	custom bool // renamed by the user
+}
+
+// renamableLabel wraps lbl; onRename runs after the user renames it.
+func renamableLabel(lbl *gtk.Label, onRename func()) *renamable {
+	r := &renamable{lbl: lbl}
+	r.Box, _ = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
+	eb, _ := gtk.EventBoxNew()
+	eb.SetVisibleWindow(false)
+	eb.Add(lbl)
+	r.ent, _ = gtk.EntryNew()
+	r.ent.SetWidthChars(12)
+	r.PackStart(eb, false, false, 0)
+	r.PackStart(r.ent, false, false, 0)
+
+	editing := false
+	finish := func(commit bool) {
+		if !editing {
+			return
+		}
+		editing = false
+		r.ent.Hide()
+		r.lbl.Show()
+		if name, _ := r.ent.GetText(); commit && strings.TrimSpace(name) != "" {
+			r.lbl.SetText(strings.TrimSpace(name))
+			r.custom = true
+			onRename()
+		}
+	}
+	// Single clicks fall through to the notebook so the tab still switches.
+	eb.Connect("button-press-event", func(_ *gtk.EventBox, ev *gdk.Event) bool {
+		b := gdk.EventButtonNewFromEvent(ev)
+		if b.Type() != gdk.EVENT_2BUTTON_PRESS || b.Button() != gdk.BUTTON_PRIMARY {
+			return false
+		}
+		editing = true
+		r.ent.SetText(r.lbl.GetLabel())
+		r.lbl.Hide()
+		r.ent.Show()
+		r.ent.GrabFocus()
+		return true
+	})
+	r.ent.Connect("activate", func() { finish(true) })
+	r.ent.Connect("focus-out-event", func() bool { finish(true); return false })
+	r.ent.Connect("key-press-event", func(_ *gtk.Entry, ev *gdk.Event) bool {
+		if gdk.EventKeyNewFromEvent(ev).KeyVal() == gdk.KEY_Escape {
+			finish(false)
+			return true
+		}
+		return false
+	})
+	return r
+}
+
+// finishShow hides the entry after the tab has been shown with ShowAll.
+func (r *renamable) finishShow() { r.ent.Hide() }
+
 func (a *App) closeTerminal(t *Terminal) {
+	a.dropTerminal(t)
+	a.saveTerminals()
+	if len(a.terminals) == 0 {
+		a.termBtn.SetActive(false)
+	}
+}
+
+// dropTerminal closes t and removes its tab without touching the saved list.
+func (a *App) dropTerminal(t *Terminal) {
 	for i, x := range a.terminals {
 		if x == t {
 			a.terminals = append(a.terminals[:i], a.terminals[i+1:]...)
+			delete(a.termLabels, t)
 			t.Close()
 			a.termNB.RemovePage(a.termNB.PageNum(t.Root))
 			break
 		}
 	}
-	if len(a.terminals) == 0 {
-		a.termBtn.SetActive(false)
+}
+
+func (a *App) terminalsFile() string {
+	return filepath.Join(a.root, ".edmin", "terminals.json")
+}
+
+// saveTerminals stores the names of renamed terminal tabs, in tab order, so
+// they reopen with the project. Tabs with default names aren't saved.
+func (a *App) saveTerminals() {
+	var names []string
+	for i := 0; i < a.termNB.GetNPages(); i++ {
+		w, err := a.termNB.GetNthPage(i)
+		if err != nil {
+			continue
+		}
+		for t, r := range a.termLabels {
+			if r.custom && t.Root.Native() == w.ToWidget().Native() {
+				names = append(names, r.lbl.GetLabel())
+			}
+		}
+	}
+	f := a.terminalsFile()
+	if len(names) == 0 {
+		// Nothing to remember; don't leave an empty file behind.
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			a.setStatusMsg("Could not save terminal names: " + err.Error())
+		}
+		return
+	}
+	data, _ := json.MarshalIndent(names, "", "  ")
+	err := os.MkdirAll(filepath.Dir(f), 0755)
+	if err == nil {
+		err = os.WriteFile(f, append(data, '\n'), 0644)
+	}
+	if err != nil {
+		a.setStatusMsg("Could not save terminal names: " + err.Error())
+	}
+}
+
+// restoreTerminals opens the project's saved terminal tabs, or one default
+// terminal if none were saved.
+func (a *App) restoreTerminals() {
+	var names []string
+	if data, err := os.ReadFile(a.terminalsFile()); err == nil {
+		json.Unmarshal(data, &names)
+	}
+	if len(names) == 0 {
+		a.newTerminal()
+		return
+	}
+	for _, n := range names {
+		a.newNamedTerminal(n)
+	}
+	a.termNB.SetCurrentPage(0)
+	if t := a.currentTerminal(); t != nil {
+		t.Focus()
 	}
 }
 
@@ -454,6 +661,7 @@ func (a *App) showRefs(title string, refs []SymbolRef, name string) {
 
 func (a *App) showError(title, msg string) {
 	d := gtk.MessageDialogNew(a.win, gtk.DIALOG_MODAL, gtk.MESSAGE_ERROR, gtk.BUTTONS_OK, "%s", title)
+	a.themed(d)
 	d.FormatSecondaryText("%s", msg)
 	d.Run()
 	d.Destroy()
@@ -463,6 +671,7 @@ func (a *App) showError(title, msg string) {
 func (a *App) askSave(name string) gtk.ResponseType {
 	d := gtk.MessageDialogNew(a.win, gtk.DIALOG_MODAL, gtk.MESSAGE_QUESTION, gtk.BUTTONS_NONE,
 		"Save changes to %s?", name)
+	a.themed(d)
 	d.AddButton("Don't Save", gtk.RESPONSE_NO)
 	d.AddButton("Cancel", gtk.RESPONSE_CANCEL)
 	d.AddButton("Save", gtk.RESPONSE_YES)
@@ -475,6 +684,7 @@ func (a *App) askSave(name string) gtk.ResponseType {
 func (a *App) prompt(title, label, initial string) (string, bool) {
 	d, _ := gtk.DialogNewWithButtons(title, a.win, gtk.DIALOG_MODAL,
 		[]interface{}{"Cancel", gtk.RESPONSE_CANCEL}, []interface{}{"OK", gtk.RESPONSE_OK})
+	a.themed(d)
 	d.SetDefaultResponse(gtk.RESPONSE_OK)
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 6)
 	box.SetBorderWidth(10)
@@ -510,28 +720,54 @@ func (a *App) confirmQuit() bool {
 	return true
 }
 
-func (a *App) openFolder() {
-	d, _ := gtk.FileChooserDialogNewWith2Buttons("Open Folder", a.win, gtk.FILE_CHOOSER_ACTION_SELECT_FOLDER,
+// chooseFolder asks for a folder; it returns "" if the dialog is cancelled.
+func (a *App) chooseFolder(title string) string {
+	d, _ := gtk.FileChooserDialogNewWith2Buttons(title, a.win, gtk.FILE_CHOOSER_ACTION_SELECT_FOLDER,
 		"Cancel", gtk.RESPONSE_CANCEL, "Open", gtk.RESPONSE_ACCEPT)
+	a.themed(d)
 	d.SetCurrentFolder(a.root)
+	dir := ""
 	if d.Run() == gtk.RESPONSE_ACCEPT {
-		dir := d.GetFilename()
-		d.Destroy()
-		if dir != "" && dir != a.root {
-			if !a.confirmQuit() {
-				return
-			}
-			for len(a.editors.editors) > 0 {
-				e := a.editors.editors[0]
-				e.Buf.SetModified(false)
-				a.editors.Close(e)
-			}
-			a.setRoot(dir)
-			a.newTerminal()
-		}
-		return
+		dir = d.GetFilename()
 	}
 	d.Destroy()
+	return dir
+}
+
+// openFolderInNewWindow opens a chosen folder as a project in a new window,
+// or raises the window that already has it open.
+func (a *App) openFolderInNewWindow() {
+	dir := a.chooseFolder("Open Folder in New Window")
+	if dir == "" {
+		return
+	}
+	for _, x := range apps {
+		if x.root == dir {
+			x.win.Present()
+			return
+		}
+	}
+	newApp(dir).win.Present()
+}
+
+func (a *App) openFolder() {
+	if dir := a.chooseFolder("Open Folder"); dir != "" && dir != a.root {
+		if !a.confirmQuit() {
+			return
+		}
+		for len(a.editors.editors) > 0 {
+			e := a.editors.editors[0]
+			e.Buf.SetModified(false)
+			a.editors.Close(e)
+		}
+		// The old project's terminals close with it; its saved names stay.
+		for len(a.terminals) > 0 {
+			a.dropTerminal(a.terminals[0])
+		}
+		a.termCount = 0
+		a.setRoot(dir)
+		a.restoreTerminals()
+	}
 }
 
 // ---- Keyboard shortcuts ----
@@ -572,6 +808,9 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 	case ctrlShift && kv == gdk.KEY_b:
 		a.buildBtn.SetActive(!a.buildBtn.GetActive())
 		return true
+	case ctrlShift && kv == gdk.KEY_o:
+		a.openFolderInNewWindow()
+		return true
 	}
 	if inTerm || !ctrl && !ctrlShift {
 		return false
@@ -601,8 +840,7 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 			return true
 		}
 	case gdk.KEY_n:
-		a.leftBtn.SetActive(true)
-		a.leftPanel.SetCurrentPage(0)
+		a.showExplorer()
 		a.tree.create(ctrlShift)
 		return true
 	case gdk.KEY_o:

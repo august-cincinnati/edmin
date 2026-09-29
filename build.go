@@ -147,6 +147,7 @@ func (b *BuildPanel) edit(idx int) {
 	}
 	d, _ := gtk.DialogNewWithButtons(title, b.app.win, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
 		[]interface{}{"Cancel", gtk.RESPONSE_CANCEL}, []interface{}{"Save", gtk.RESPONSE_OK})
+	b.app.themed(d)
 	d.SetDefaultResponse(gtk.RESPONSE_OK)
 	d.SetDefaultSize(420, -1)
 	grid, _ := gtk.GridNew()

@@ -33,12 +33,13 @@ type Terminal struct {
 	dirty        atomic.Bool
 	closed       atomic.Bool
 	onExit       func()
+	theme        *Theme
 	sbLines      int  // scrollback lines currently in the buffer
 	follow       bool // keep the view pinned to the bottom
 }
 
-func NewTerminal(dir string, onExit func()) *Terminal {
-	t := &Terminal{dir: dir, onExit: onExit, tags: map[attr]*gtk.TextTag{}}
+func NewTerminal(dir string, theme *Theme, onExit func()) *Terminal {
+	t := &Terminal{dir: dir, theme: theme, onExit: onExit, tags: map[attr]*gtk.TextTag{}}
 	t.Root, _ = gtk.ScrolledWindowNew(nil, nil)
 	t.Root.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_ALWAYS)
 	t.view, _ = gtk.TextViewNew()
@@ -193,9 +194,9 @@ func colorHex(c int, def string) string {
 	}
 }
 
-// colors resolves a's foreground and background in the active theme; bg is
-// empty when it is the terminal's default background.
-func (a attr) colors() (fg, bg string) {
+// colors resolves a's foreground and background in theme; bg is empty when
+// it is the terminal's default background.
+func (a attr) colors(theme *Theme) (fg, bg string) {
 	f, b := a.fg, a.bg
 	if a.bold && f >= 0 && f < 8 {
 		f += 8
@@ -211,9 +212,10 @@ func (a attr) colors() (fg, bg string) {
 }
 
 // restyle recolours existing text after a theme change.
-func (t *Terminal) restyle() {
+func (t *Terminal) restyle(theme *Theme) {
+	t.theme = theme
 	for a, tag := range t.tags {
-		fg, bg := a.colors()
+		fg, bg := a.colors(theme)
 		tag.SetProperty("foreground", fg)
 		if bg != "" {
 			tag.SetProperty("background", bg)
@@ -232,7 +234,7 @@ func (t *Terminal) tagFor(a attr) *gtk.TextTag {
 	if tag, ok := t.tags[a]; ok {
 		return tag
 	}
-	fgs, bgs := a.colors()
+	fgs, bgs := a.colors(t.theme)
 	props := map[string]interface{}{"foreground": fgs}
 	if bgs != "" {
 		props["background"] = bgs

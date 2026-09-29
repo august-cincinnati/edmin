@@ -136,7 +136,7 @@ func (a *EditorArea) Open(path string) *Editor {
 	e.View.SetWrapMode(gtk.WRAP_NONE)
 	e.Buf, _ = e.View.GetBuffer()
 	e.Root.Add(e.View)
-	for name := range theme.Syntax {
+	for name := range a.app.theme.Syntax {
 		props := map[string]interface{}{}
 		for k, v := range highlightStyles[name] {
 			props[k] = v
@@ -207,8 +207,9 @@ func (a *EditorArea) Unsaved() []*Editor {
 	return out
 }
 
-// styleTags colours the editor's tags from the active theme.
+// styleTags colours the editor's tags from its window's theme.
 func (e *Editor) styleTags() {
+	theme := e.area.app.theme
 	tt, _ := e.Buf.GetTagTable()
 	set := func(name string, props map[string]string) {
 		if tag, err := tt.Lookup(name); err == nil && tag != nil {
@@ -401,7 +402,7 @@ func (e *Editor) highlight() {
 
 func (e *Editor) applyHighlights(spans []Span) {
 	start, end := e.Buf.GetBounds()
-	for name := range theme.Syntax {
+	for name := range e.area.app.theme.Syntax {
 		e.Buf.RemoveTagByName(name, start, end)
 	}
 	nlines := e.Buf.GetLineCount()

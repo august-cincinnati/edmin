@@ -10,7 +10,8 @@ dependencies; everything else, including the terminal emulator, is plain Go.
 ## Features
 
 - **File explorer** on the left. Folders load when you expand them.
-  Right-click for *New File*, *New Folder* and *Refresh*. `.git` and
+  The header bar has *New File*, *New Folder*, *Refresh* and *Collapse all*
+  buttons, and the first three are also on the right-click menu. `.git` and
   `node_modules` are hidden.
 - **Tabbed editor.** Tabs can be dragged to reorder, and a `●` marks
   unsaved changes. The editor has:
@@ -29,8 +30,10 @@ dependencies; everything else, including the terminal emulator, is plain Go.
     **Definitions** group first, followed by every usage grouped by file.
   - Works in every language listed under [Languages](#languages).
 - **Themes**: Light, Dark, Tan and Solarized Dark. Choose one in Settings
-  (the menu button in the header bar, or `Ctrl+,`). It applies immediately
-  and is remembered in `~/.config/edmin/settings.json`.
+  (the menu button in the header bar, or `Ctrl+,`). It applies immediately to
+  that window only, so different projects can look different. The choice is
+  saved for the project in `.edmin/settings.json`, and in
+  `~/.config/edmin/settings.json` as the default for projects without one.
 - **Terminals** in tabs along the bottom. Each runs your `$SHELL` through a
   pseudo-terminal and a built-in xterm-compatible emulator that supports
   colors, scrollback, and full-screen programs such as `vim` and `less`.
@@ -121,12 +124,23 @@ few minutes. Later builds are fast.
 ## Usage
 
 ```sh
-./edmin                 # open the current directory as the project
+./edmin                 # reopen last session's projects (or the current directory)
 ./edmin path/to/project # open a folder
 ./edmin path/to/file.go # open a file (its folder becomes the project)
+./edmin proj-a proj-b   # open each project in its own window
 ```
 
 Use the folder button in the header bar, or `Ctrl+O`, to switch projects.
+To work on several projects at once, use the new-window button next to it, or
+`Ctrl+Shift+O`, to open a folder in a new window. Each window has its own
+tabs, terminals, build commands and colour theme. EdMin exits when the last
+window is closed.
+
+EdMin remembers which projects are open, in `~/.config/edmin/settings.json`.
+Running `./edmin` with no arguments reopens them, one window each, skipping
+any folder that no longer exists. Closing a window removes its project from
+the list, except for the last window: the projects open when you quit are the
+ones that come back.
 
 ## Keyboard shortcuts
 
@@ -140,10 +154,12 @@ Use the folder button in the header bar, or `Ctrl+O`, to switch projects.
 | `Ctrl+G`                    | Go to line                               |
 | `Ctrl+Click`                | Go to definition / find usages           |
 | `Ctrl+O`                    | Open folder                              |
+| `Ctrl+Shift+O`              | Open folder in new window                |
 | `Ctrl+,`                    | Settings (theme)                         |
 | `Ctrl+B`                    | Toggle file explorer                     |
 | `` Ctrl+` ``                | Toggle terminal panel                    |
 | `` Ctrl+Shift+` ``          | New terminal                             |
+| Double-click terminal tab  | Rename terminal (`Enter` to save, `Esc` to cancel); renamed tabs reopen with the project |
 | `Ctrl+Shift+B`              | Toggle build panel                       |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal         |
 | `Shift+PageUp` / `Shift+PageDown` | Scroll terminal history            |
@@ -151,6 +167,11 @@ Use the folder button in the header bar, or `Ctrl+O`, to switch projects.
 When a terminal has focus, plain `Ctrl+<key>` combinations such as `Ctrl+C`
 and `Ctrl+B` go to the shell. Only the `Ctrl+Shift` shortcuts and `` Ctrl+` ``
 are handled by the editor.
+
+Renamed terminal tabs are saved per project in `.edmin/terminals.json`, in tab
+order. When the project opens again, EdMin opens one terminal for each saved
+name. Only the names are kept, not the shell sessions. Closing a renamed tab
+removes it from the list.
 
 ## Build commands
 
