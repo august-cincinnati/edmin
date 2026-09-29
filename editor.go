@@ -328,7 +328,7 @@ func (e *Editor) Redo() {
 
 func (e *Editor) onKey(_ *gtk.TextView, ev *gdk.Event) bool {
 	k := gdk.EventKeyNewFromEvent(ev)
-	mods := gdk.ModifierType(k.State()) & (gdk.CONTROL_MASK | gdk.SHIFT_MASK | gdk.MOD1_MASK)
+	mods := shortcutMods(k.State())
 	switch k.KeyVal() {
 	case gdk.KEY_Return, gdk.KEY_KP_Enter:
 		if mods != 0 {
@@ -358,7 +358,7 @@ func (e *Editor) onClick(_ *gtk.TextView, ev *gdk.Event) bool {
 	e.lastBreak = true
 	e.clearJumpLine()
 	if b.Button() != gdk.BUTTON_PRIMARY || b.Type() != gdk.EVENT_BUTTON_PRESS ||
-		gdk.ModifierType(b.State())&gdk.CONTROL_MASK == 0 {
+		shortcutMods(b.State())&gdk.CONTROL_MASK == 0 {
 		return false
 	}
 	bx, by := e.View.WindowToBufferCoords(gtk.TEXT_WINDOW_WIDGET, int(b.X()), int(b.Y()))

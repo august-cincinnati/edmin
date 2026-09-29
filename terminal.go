@@ -420,6 +420,19 @@ func (t *Terminal) onKey(_ *gtk.TextView, ev *gdk.Event) bool {
 	shift := state&gdk.SHIFT_MASK != 0
 	alt := state&gdk.MOD1_MASK != 0
 
+	// Ctrl+Shift+C/V copy and paste; on macOS so do Cmd+C/V, and other Cmd
+	// combos are left to the app since Ctrl stays the terminal's own key.
+	if isCommand(k.State()) {
+		switch kv {
+		case gdk.KEY_C, gdk.KEY_c:
+			t.copySelection()
+			return true
+		case gdk.KEY_V, gdk.KEY_v:
+			t.paste()
+			return true
+		}
+		return false
+	}
 	if ctrl && shift {
 		switch kv {
 		case gdk.KEY_C, gdk.KEY_c:

@@ -829,7 +829,7 @@ func (a *App) openFolder() {
 
 func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 	k := gdk.EventKeyNewFromEvent(ev)
-	mods := gdk.ModifierType(k.State()) & (gdk.CONTROL_MASK | gdk.SHIFT_MASK | gdk.MOD1_MASK)
+	mods := shortcutMods(k.State())
 	kv := gdk.KeyvalToLower(k.KeyVal())
 	ctrl := mods == gdk.CONTROL_MASK
 	ctrlShift := mods == gdk.CONTROL_MASK|gdk.SHIFT_MASK

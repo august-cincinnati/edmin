@@ -103,7 +103,7 @@ cache.
 
 ## Requirements
 
-- Linux
+- Linux or macOS
 - Go 1.25 or newer
 - GTK 3 development files and a C compiler (gotk3 and tree-sitter use cgo)
 
@@ -112,6 +112,16 @@ On Debian/Ubuntu:
 ```sh
 sudo apt install golang-go libgtk-3-dev build-essential
 ```
+
+On macOS (with Homebrew and the Xcode command line tools):
+
+```sh
+brew install go gtk+3 pkg-config
+```
+
+On macOS, Cmd works in place of Ctrl for every shortcut and for
+Cmd+Click. In the terminal, Cmd+C and Cmd+V copy and paste, and Ctrl keeps
+its usual terminal meaning (Ctrl+C interrupts).
 
 ## Building
 
@@ -233,7 +243,8 @@ buttons.
 | `build.go`    | Build commands panel                                      |
 | `terminal.go` | Terminal widget (rendering and keyboard input)            |
 | `vt.go`       | VT100/xterm screen emulator (no GTK code)                 |
-| `pty.go`      | Pseudo-terminal support using Linux ioctls                |
+| `pty_*.go`    | Pseudo-terminal support (shared, Linux and macOS ioctls)  |
+| `keys.go`     | Modifier handling (Cmd as Ctrl on macOS)                  |
 | `shell.go`    | Choosing each project's terminal shell (WSL, sshfs)     |
 | `util.go`     | Word-based fallbacks for files without a grammar          |
 
@@ -264,7 +275,10 @@ The tests cover:
   every pattern compiles.
 - **The terminal emulator is not complete.** Mouse reporting is not
   supported, and wide characters (CJK, emoji) are treated as one column.
-- **Linux only.** The pseudo-terminal code uses Linux-specific ioctls.
+- **Linux and macOS only.** The pseudo-terminal code uses Unix ioctls, so
+  Windows is not supported (WSL works). The macOS build is untested on real
+  hardware; GTK 3 there does not use the native menu bar and EdMin is not
+  packaged as an `.app`.
 - **gotk3 version.** The latest gotk3 release (v0.6.4) does not compile
   because of a missing import, so `go.mod` pins a newer commit from its
   master branch.
