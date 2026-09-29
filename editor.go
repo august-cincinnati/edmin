@@ -361,7 +361,15 @@ func (e *Editor) onClick(_ *gtk.TextView, ev *gdk.Event) bool {
 		shortcutMods(b.State())&gdk.CONTROL_MASK == 0 {
 		return false
 	}
-	bx, by := e.View.WindowToBufferCoords(gtk.TEXT_WINDOW_WIDGET, int(b.X()), int(b.Y()))
+	// The event's X/Y are relative to whichever window received it (the
+	// text area, not the widget, which also holds the gutter), so work from
+	// root coordinates relative to the text window.
+	ox, oy := e.View.GetWindow(gtk.TEXT_WINDOW_TEXT).GetOrigin()
+	wx, wy := int(b.XRoot())-ox, int(b.YRoot())-oy
+	if wx < 0 || wy < 0 {
+		return false // Ctrl+click in the gutter
+	}
+	bx, by := e.View.WindowToBufferCoords(gtk.TEXT_WINDOW_TEXT, wx, wy)
 	iter := e.View.GetIterAtLocation(bx, by)
 	e.Buf.PlaceCursor(iter)
 	e.area.app.symbolAction(e, iter.GetLine(), iter.GetLineIndex())

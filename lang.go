@@ -615,7 +615,9 @@ func fieldOf(parent, child *ts.Node) string {
 var nameFieldExcluded = set("call_expression", "selector_expression", "keyed_element", "method_invocation",
 	"field_access", "labeled_statement", "attribute", "member_expression", "command", "call",
 	"generic_name", "scoped_identifier", "qualified_name", "named_argument", "argument",
-	"qualified_identifier", "jsx_opening_element", "jsx_closing_element", "jsx_self_closing_element")
+	"qualified_identifier", "jsx_opening_element", "jsx_closing_element", "jsx_self_closing_element",
+	"member_access_expression", "member_binding_expression", "member_call_expression",
+	"nullsafe_member_call_expression", "nullsafe_member_access_expression", "scoped_call_expression")
 
 // structuralDef recognises definitions from the syntax tree shape.
 func (l *Language) structuralDef(n *ts.Node, src []byte) bool {

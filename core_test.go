@@ -363,3 +363,41 @@ func TestDetectShell(t *testing.T) {
 		}
 	}
 }
+
+// Ctrl+clicking a method call resolves to the method, not the receiver,
+// and the call itself is not mistaken for a definition.
+func TestMethodCalls(t *testing.T) {
+	cases := []struct{ file, src, call, name string }{
+		{"a.go", "package p\ntype T struct{}\nfunc (t T) Run() {}\nfunc f() {\n  var obj T\n  obj.Run()\n}\n", "obj.Run()", "Run"},
+		{"a.py", "class T:\n    def run(self): pass\n    def m(self):\n        self.run()\n", "self.run()", "run"},
+		{"a.ts", "class T {\n  run(): void {}\n}\nconst obj = new T();\nobj.run();\n", "obj.run()", "run"},
+		{"a.java", "class T {\n  void run() {}\n  void m() {\n    T obj = new T();\n    obj.run();\n  }\n}\n", "obj.run()", "run"},
+		{"a.cpp", "struct T {\n  void run() {}\n};\nint main() {\n  T* obj;\n  obj->run();\n}\n", "obj->run()", "run"},
+		{"a.rs", "struct T;\nimpl T {\n  fn run(&self) {}\n}\nfn main() {\n  let obj = T;\n  obj.run();\n}\n", "obj.run()", "run"},
+		{"a.cs", "class T {\n  void Run() {}\n  void M() {\n    var obj = new T();\n    obj.Run();\n    obj?.Run();\n  }\n}\n", "obj.Run()", "Run"},
+		{"a.php", "<?php\nclass T {\n  function run() {}\n}\n$obj = new T();\n$obj->run();\n$obj?->run();\nT::run();\n", "$obj->run()", "run"},
+	}
+	for _, c := range cases {
+		lang := languageFor(c.file)
+		lines := strings.Split(c.src, "\n")
+		for i, l := range lines {
+			j := strings.Index(l, c.call)
+			if j < 0 {
+				continue
+			}
+			sym, ok := lang.SymbolAt([]byte(c.src), i, j+strings.Index(c.call, c.name))
+			if !ok || sym.Name != c.name || sym.IsDef {
+				t.Errorf("%s: SymbolAt method call = %+v ok=%v", c.file, sym, ok)
+			}
+		}
+		var defs []SymbolRef
+		for _, r := range lang.FindRefs(c.file, []byte(c.src), c.name) {
+			if r.IsDef {
+				defs = append(defs, r)
+			}
+		}
+		if len(defs) != 1 {
+			t.Errorf("%s: want only the method declaration as a definition, got %+v", c.file, defs)
+		}
+	}
+}
