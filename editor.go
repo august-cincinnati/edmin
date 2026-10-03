@@ -64,9 +64,9 @@ func NewEditorArea(app *App) *EditorArea {
 		glib.IdleAdd(func() bool { a.app.updateStatus(); a.app.updateTitle(); return false })
 	})
 	a.welcome, _ = gtk.LabelNew("Open a file from the explorer.\n\n" +
-		"Ctrl+S save · Ctrl+W close tab · Ctrl+F find · Ctrl+Shift+F find in project\n" +
+		"Ctrl+S save · Ctrl+W close tab · Ctrl+Tab next tab · Ctrl+F find · Ctrl+Shift+F find in project\n" +
 		"Ctrl+Click a symbol: jump to definition / find usages\n" +
-		"Ctrl+1 explorer · Ctrl+2 terminal · Ctrl+3 build panel · Ctrl+4 settings\n" +
+		"Ctrl+1 explorer · Ctrl+2 terminal · Ctrl+3 build panel · Ctrl+4 settings · Ctrl+5 editor\n" +
 		"Ctrl+Shift+1–4 closes them")
 	a.welcome.SetJustify(gtk.JUSTIFY_CENTER)
 	a.welcome.SetVExpand(true)

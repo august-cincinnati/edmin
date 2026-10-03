@@ -78,6 +78,24 @@ func TestVTClearScrollback(t *testing.T) {
 	}
 }
 
+func TestVTSynchronizedOutput(t *testing.T) {
+	v := NewVT(3, 10)
+	var reply []byte
+	v.Reply = func(b []byte) { reply = append(reply, b...) }
+	v.Write([]byte("\x1b[?2026$p"))
+	if string(reply) != "\x1b[?2026;2$y" {
+		t.Fatalf("DECRQM reply = %q", reply)
+	}
+	v.Write([]byte("\x1b[?2026hhalf"))
+	if !v.Holding() {
+		t.Fatalf("not holding during a synchronized frame")
+	}
+	v.Write([]byte(" done\x1b[?2026l"))
+	if v.Holding() {
+		t.Fatalf("still holding after the frame ended")
+	}
+}
+
 func TestVTWrapAndReply(t *testing.T) {
 	v := NewVT(3, 4)
 	var reply string

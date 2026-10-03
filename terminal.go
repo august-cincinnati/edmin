@@ -164,6 +164,9 @@ func (t *Terminal) scheduleRender() {
 		return
 	}
 	glib.TimeoutAdd(16, func() bool {
+		if t.vt != nil && t.vt.Holding() && !t.closed.Load() {
+			return true // wait for the frame to finish; the timer repeats
+		}
 		t.dirty.Store(false)
 		if !t.closed.Load() {
 			t.render()

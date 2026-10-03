@@ -89,6 +89,7 @@ func main() {
 		app := newApp(root)
 		if openFile != "" {
 			app.editors.Open(openFile)
+			app.focusWorkspace()
 		}
 	}
 	gtk.Main()
@@ -353,7 +354,7 @@ func (a *App) newNamedTerminal(name string) *Terminal {
 	if len(shell) == 0 {
 		shell = defaultShell()
 	}
-	tab.SetTooltipText("Runs: " + strings.Join(shell, " ") + "\nDouble-click the name to rename")
+	tab.SetTooltipText("Runs: " + strings.Join(shell, " ") + "\nDouble-click the name (or Ctrl+Shift+R) to rename")
 	if name != "" {
 		lbl.SetText(name)
 		lblBox.custom = true
@@ -388,6 +389,10 @@ type renamable struct {
 	lbl    *gtk.Label
 	ent    *gtk.Entry
 	custom bool // renamed by the user
+
+	// edit turns the label into an entry; then, if non-nil, runs when the
+	// edit ends.
+	edit func(then func())
 }
 
 // renamableLabel wraps lbl; onRename runs after the user renames it.
@@ -403,6 +408,7 @@ func renamableLabel(lbl *gtk.Label, onRename func()) *renamable {
 	r.PackStart(r.ent, false, false, 0)
 
 	editing := false
+	var after func()
 	finish := func(commit bool) {
 		if !editing {
 			return
@@ -415,6 +421,21 @@ func renamableLabel(lbl *gtk.Label, onRename func()) *renamable {
 			r.custom = true
 			onRename()
 		}
+		if after != nil {
+			then := after
+			after = nil
+			then()
+		}
+	}
+	r.edit = func(then func()) {
+		if editing {
+			return
+		}
+		editing, after = true, then
+		r.ent.SetText(r.lbl.GetLabel())
+		r.lbl.Hide()
+		r.ent.Show()
+		r.ent.GrabFocus()
 	}
 	// Single clicks fall through to the notebook so the tab still switches.
 	eb.Connect("button-press-event", func(_ *gtk.EventBox, ev *gdk.Event) bool {
@@ -422,11 +443,7 @@ func renamableLabel(lbl *gtk.Label, onRename func()) *renamable {
 		if b.Type() != gdk.EVENT_2BUTTON_PRESS || b.Button() != gdk.BUTTON_PRIMARY {
 			return false
 		}
-		editing = true
-		r.ent.SetText(r.lbl.GetLabel())
-		r.lbl.Hide()
-		r.ent.Show()
-		r.ent.GrabFocus()
+		r.edit(nil)
 		return true
 	})
 	r.ent.Connect("activate", func() { finish(true) })
@@ -504,6 +521,9 @@ func (a *App) saveTerminals() {
 
 // restoreTerminals opens the project's saved terminal tabs, or one default
 // terminal if none were saved.
+// restoreTerminals reopens the project's saved terminals, leaving the
+// keyboard focus on the editor or explorer rather than in a terminal, where
+// plain Ctrl shortcuts would go to the shell.
 func (a *App) restoreTerminals() {
 	var names []string
 	if data, err := os.ReadFile(a.terminalsFile()); err == nil {
@@ -511,14 +531,20 @@ func (a *App) restoreTerminals() {
 	}
 	if len(names) == 0 {
 		a.newTerminal()
-		return
 	}
 	for _, n := range names {
 		a.newNamedTerminal(n)
 	}
 	a.termNB.SetCurrentPage(0)
-	if t := a.currentTerminal(); t != nil {
-		t.Focus()
+	a.focusWorkspace()
+}
+
+// focusWorkspace focuses the current editor, or the explorer if no file is open.
+func (a *App) focusWorkspace() {
+	if e := a.editors.Current(); e != nil {
+		e.View.GrabFocus()
+	} else {
+		a.tree.view.GrabFocus()
 	}
 }
 
@@ -882,8 +908,11 @@ func (a *App) openFolder() {
 
 // panelKey handles Ctrl+1-4, which open the explorer, terminal, build panel
 // and settings (focusing the panel if it is already open), and with Shift
-// held close them.
+// held close them. Ctrl+5 focuses the file editor.
 func (a *App) panelKey(n int, close bool) {
+	if n == 5 && close {
+		return
+	}
 	if a.settingsDlg != nil {
 		if n == 4 && !close {
 			a.settingsDlg.Present()
@@ -924,10 +953,14 @@ func (a *App) panelKey(n int, close bool) {
 		a.build.view.GrabFocus()
 	case 4:
 		a.showSettings()
+	case 5:
+		if e := a.editors.Current(); e != nil {
+			e.View.GrabFocus()
+		}
 	}
 }
 
-// resizeStep is how far one Ctrl+Alt+Arrow press moves a divider, in pixels.
+// resizeStep is how far one Alt+Shift+Arrow press moves a divider, in pixels.
 const resizeStep = 20
 
 // focusIn reports whether the window's focus is inside w.
@@ -949,7 +982,7 @@ func (a *App) focusIn(w gtk.IWidget) bool {
 	return false
 }
 
-// resizePane handles Ctrl+Alt+Arrow, which moves a divider of the focused pane
+// resizePane handles Alt+Shift+Arrow, which moves a divider of the focused pane
 // in the arrow's direction, as tmux's resize-pane does: Left/Right move the
 // pane's right edge if another panel is open to its right, else its left
 // edge; Up/Down likewise move the bottom edge, else the top.
@@ -996,6 +1029,50 @@ func (a *App) resizePane(kv uint) bool {
 	return true
 }
 
+// closeCurrentTab handles Ctrl+Shift+W: it closes the current terminal tab if
+// the terminal panel has focus, otherwise the current file tab.
+func (a *App) closeCurrentTab() {
+	if a.focusIn(a.termPanel) {
+		if t := a.currentTerminal(); t != nil {
+			a.closeTerminal(t)
+			if t := a.currentTerminal(); t != nil {
+				t.Focus()
+			} else if e := a.editors.Current(); e != nil {
+				e.View.GrabFocus()
+			}
+		}
+		return
+	}
+	if e := a.editors.Current(); e != nil {
+		a.editors.Close(e)
+		if e := a.editors.Current(); e != nil {
+			e.View.GrabFocus()
+		}
+	}
+}
+
+// cycleTab handles Ctrl+Tab and Ctrl+Shift+Tab: it moves delta tabs through
+// the terminal tabs if the terminal panel has focus, otherwise through the
+// file tabs, wrapping at either end.
+func (a *App) cycleTab(delta int) {
+	nb := a.editors.nb
+	if a.focusIn(a.termPanel) {
+		nb = a.termNB
+	}
+	n := nb.GetNPages()
+	if n == 0 {
+		return
+	}
+	nb.SetCurrentPage(((nb.GetCurrentPage()+delta)%n + n) % n)
+	if nb == a.termNB {
+		if t := a.currentTerminal(); t != nil {
+			t.Focus()
+		}
+	} else if e := a.editors.Current(); e != nil {
+		e.View.GrabFocus()
+	}
+}
+
 func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 	k := gdk.EventKeyNewFromEvent(ev)
 	mods := shortcutMods(k.State())
@@ -1006,10 +1083,17 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 
 	// Shortcuts that work everywhere, including inside a terminal.
 	switch {
-	case mods == gdk.CONTROL_MASK|gdk.MOD1_MASK && a.resizePane(kv):
+	case mods == gdk.SHIFT_MASK|gdk.MOD1_MASK && a.resizePane(kv):
 		return true
 	case (ctrl || ctrlShift) && panelDigit(kv) != 0:
 		a.panelKey(panelDigit(kv), ctrlShift)
+		return true
+	case ctrlShift && kv == gdk.KEY_r && inTerm:
+		// Rename the focused terminal's tab, then return to the terminal.
+		t := a.focusedTerminal()
+		if r := a.termLabels[t]; r != nil {
+			r.edit(t.Focus)
+		}
 		return true
 	case ctrlShift && kv == gdk.KEY_t:
 		a.newTerminal()
@@ -1028,6 +1112,16 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 		return true
 	case ctrlShift && kv == gdk.KEY_o:
 		a.openFolderInNewWindow()
+		return true
+	case ctrlShift && kv == gdk.KEY_w:
+		a.closeCurrentTab()
+		return true
+	case (ctrl || ctrlShift) && (kv == gdk.KEY_Tab || kv == gdk.KEY_ISO_Left_Tab || kv == gdk.KEY_KP_Tab):
+		if ctrlShift {
+			a.cycleTab(-1)
+		} else {
+			a.cycleTab(1)
+		}
 		return true
 	case ctrlShift && kv == gdk.KEY_x:
 		// Goes through delete-event, like the title bar's close button.

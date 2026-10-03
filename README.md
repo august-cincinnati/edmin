@@ -165,6 +165,8 @@ ones that come back.
 | --------------------------- | ---------------------------------------- |
 | `Ctrl+S`                    | Save current file                        |
 | `Ctrl+W`                    | Close current tab                        |
+| `Ctrl+Shift+W`              | Close current terminal tab if a terminal has focus, else current file tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous terminal tab if a terminal has focus, else file tab |
 | `Ctrl+Z` / `Ctrl+Shift+Z`   | Undo / redo (`Ctrl+Y` also redoes)       |
 | `Ctrl+F`                    | Find in file (`Enter` / `Shift+Enter` to step, `Esc` to close) |
 | `Ctrl+Shift+F`              | Find in project                          |
@@ -181,18 +183,20 @@ ones that come back.
 | `Ctrl+2`                    | Open / focus terminal panel              |
 | `Ctrl+Shift+2`              | Close terminal panel                     |
 | `Ctrl+Shift+T`              | New terminal                             |
+| `Ctrl+Shift+R` (in a terminal) | Rename the terminal's tab            |
 | Double-click terminal tab  | Rename terminal (`Enter` to save, `Esc` to cancel); renamed tabs reopen with the project |
 | `Ctrl+3`                    | Open / focus build panel                 |
 | `Ctrl+Shift+3`              | Close build panel                        |
+| `Ctrl+5`                    | Focus the file editor                    |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal         |
 | `Shift+PageUp` / `Shift+PageDown` | Scroll terminal history            |
-| `Ctrl+Alt+Arrow`            | Resize the focused pane (like tmux)      |
+| `Alt+Shift+Arrow`           | Resize the focused pane (like tmux)      |
 
 When a terminal has focus, plain `Ctrl+<key>` combinations such as `Ctrl+C`
 and `Ctrl+B` go to the shell. Only the `Ctrl+Shift` shortcuts and the panel
-shortcuts `Ctrl+1`–`Ctrl+4` and `Ctrl+Alt+Arrow` are handled by the editor.
+shortcuts `Ctrl+1`–`Ctrl+5`, `Ctrl+Tab` and `Alt+Shift+Arrow` are handled by the editor.
 
-`Ctrl+Alt+Arrow` moves a divider next to the focused pane in the arrow's
+`Alt+Shift+Arrow` moves a divider next to the focused pane in the arrow's
 direction. Left/Right move the pane's right edge if a panel is open to its
 right, otherwise its left edge. Up/Down move the divider between the editor
 and the terminal.

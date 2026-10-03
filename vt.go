@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -56,8 +57,9 @@ type VT struct {
 	CursorVisible     bool
 	AppCursorKeys     bool
 	BracketedPaste    bool
-	pendingScrollback [][]cell // lines scrolled off the top since last drain
-	clearScrollback   bool     // ED 3 was received since last drain
+	syncSince         time.Time // when synchronized output (mode 2026) began; zero if off
+	pendingScrollback [][]cell  // lines scrolled off the top since last drain
+	clearScrollback   bool      // ED 3 was received since last drain
 
 	state   vtState
 	params  []byte
@@ -355,6 +357,14 @@ func (v *VT) csi(raw string, final rune) {
 		}
 		raw = raw[1:]
 	}
+	if private && final == 'p' && strings.HasSuffix(raw, "$") {
+		// DECRQM: report which private modes are supported.
+		m, _ := strconv.Atoi(strings.TrimSuffix(raw, "$"))
+		if v.Reply != nil {
+			v.Reply(fmt.Appendf(nil, "\x1b[?%d;%d$y", m, v.modeStatus(m)))
+		}
+		return
+	}
 	raw = strings.TrimRight(raw, " !\"#$%&'()*+,-./")
 	ps := parseParams(raw)
 	p := func(i, def int) int {
@@ -505,6 +515,42 @@ func b2i(b bool) int {
 	return 0
 }
 
+// modeStatus is a DECRQM answer for private mode m: 1 set, 2 reset,
+// 0 not recognised.
+func (v *VT) modeStatus(m int) int {
+	var on bool
+	switch m {
+	case 1:
+		on = v.AppCursorKeys
+	case 25:
+		on = v.CursorVisible
+	case 2004:
+		on = v.BracketedPaste
+	case 47, 1047, 1049:
+		on = v.altActive
+	case 2026:
+		on = !v.syncSince.IsZero()
+	default:
+		return 0
+	}
+	if on {
+		return 1
+	}
+	return 2
+}
+
+// maxSyncHold bounds how long a synchronized frame may hold back drawing,
+// in case a program never ends it.
+const maxSyncHold = 200 * time.Millisecond
+
+// Holding reports whether the program is mid-way through a synchronized
+// frame, so the screen should not be drawn yet.
+func (v *VT) Holding() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return !v.syncSince.IsZero() && time.Since(v.syncSince) < maxSyncHold
+}
+
 func (v *VT) setMode(m int, on bool) {
 	switch m {
 	case 1:
@@ -513,6 +559,14 @@ func (v *VT) setMode(m int, on bool) {
 		v.CursorVisible = on
 	case 2004:
 		v.BracketedPaste = on
+	case 2026:
+		// Synchronized output: the program is drawing a frame and the
+		// screen should not be shown until it ends.
+		if !on {
+			v.syncSince = time.Time{}
+		} else if v.syncSince.IsZero() {
+			v.syncSince = time.Now()
+		}
 	case 47, 1047, 1049:
 		if on == v.altActive {
 			return

@@ -22,9 +22,10 @@ func isCommand(state uint) bool {
 	return runtime.GOOS == "darwin" && gdk.ModifierType(state)&gdk.META_MASK != 0
 }
 
-// panelDigit returns which of the panel shortcut digits 1-4 a key is, or 0.
+// panelDigit returns which of the panel shortcut digits 1-5 a key is, or 0.
 // With Shift held most layouts report the shifted symbol rather than the
-// digit, so the US symbols above 1-4 count too, as do keypad digits.
+// digit, so the US symbols above 1-4 count too, as do keypad digits. 5 has
+// no Shift form, so its symbol is left out.
 func panelDigit(kv uint) int {
 	switch kv {
 	case gdk.KEY_1, gdk.KEY_exclam, gdk.KEY_KP_1, gdk.KEY_KP_End:
@@ -35,6 +36,8 @@ func panelDigit(kv uint) int {
 		return 3
 	case gdk.KEY_4, gdk.KEY_dollar, gdk.KEY_KP_4, gdk.KEY_KP_Left:
 		return 4
+	case gdk.KEY_5, gdk.KEY_KP_5, gdk.KEY_KP_Begin:
+		return 5
 	}
 	return 0
 }
