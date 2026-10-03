@@ -21,15 +21,16 @@ dependencies; everything else, including the terminal emulator, is plain Go.
   - undo and redo, grouped by word
 - **Find in file** (`Ctrl+F`) highlights every match and has next/previous
   and a *Match case* option.
-- **Find in project** (`Ctrl+Shift+F`) searches every text file, with
-  results grouped by file. Click a result to open the file at that line.
+- **Find in project** (`Ctrl+Shift+F`) opens the Search dialog and searches
+  every text file, with results grouped by file on its *Usages* tab. Click a result to open the file at that line.
 - **Go to definition / Find usages** (`Ctrl+Click` on a symbol):
   - Clicking a usage jumps to its definition.
   - Otherwise (you clicked a definition, there are several candidates, or
-    the definition is outside the project) the search panel lists a
-    **Definitions** group first, followed by every usage grouped by file.
+    the definition is outside the project) the Search dialog opens with a
+    **Definition** tab listing the candidates and a **Usages** tab listing
+    every usage grouped by file.
   - Works in every language listed under [Languages](#languages).
-- **Themes**: Light, Dark, Tan and Solarized Dark. Choose one in Settings
+- **Themes**: Light, Dark, Tan, Solarized Dark, Rust, Green and Purple. Choose one in Settings
   (the menu button in the header bar, or `Ctrl+,`). It applies immediately to
   that window only, so different projects can look different. The choice is
   saved for the project in `.edmin/settings.json`, and in
@@ -173,6 +174,7 @@ ones that come back.
 | `Ctrl+Shift+O`              | Open folder in new window                |
 | `Ctrl+,`                    | Settings (theme)                         |
 | `Ctrl+B`                    | Toggle file explorer                     |
+| `Ctrl+Shift+E`              | Jump to open file in explorer            |
 | `` Ctrl+` ``                | Toggle terminal panel                    |
 | `` Ctrl+Shift+` ``          | New terminal                             |
 | Double-click terminal tab  | Rename terminal (`Enter` to save, `Esc` to cancel); renamed tabs reopen with the project |
@@ -237,7 +239,7 @@ buttons.
 | `editor.go`   | Editor tabs, highlighting, undo/redo, in-file search      |
 | `gutter.go`   | Line-number gutter                                        |
 | `filetree.go` | File explorer                                             |
-| `search.go`   | Project-wide search and the results panel                 |
+| `search.go`   | Project-wide search and the results dialog                |
 | `lang.go`     | Language table, highlighting and definition/usage analysis |
 | `queries/`    | Official tree-sitter query files, embedded into the binary |
 | `build.go`    | Build commands panel                                      |

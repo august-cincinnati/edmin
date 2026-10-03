@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
+	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 )
@@ -25,16 +26,20 @@ const (
 
 const maxSearchResults = 5000
 
-// SearchPanel hosts project-wide search (Ctrl+Shift+F) and symbol results.
-type SearchPanel struct {
+// SearchDialog hosts project-wide search (Ctrl+Shift+F) and symbol results
+// in a window of its own, with definitions and usages on separate tabs.
+type SearchDialog struct {
 	app    *App
-	Root   *gtk.Box
+	win    *gtk.Window
 	entry  *gtk.SearchEntry
 	cs     *gtk.CheckButton
 	status *gtk.Label
-	view   *gtk.TreeView
-	store  *gtk.TreeStore
-	gen    atomic.Int64
+	nb     *gtk.Notebook
+
+	defView, useView   *gtk.TreeView
+	defStore, useStore *gtk.TreeStore
+	defLbl, useLbl     *gtk.Label
+	gen                atomic.Int64
 
 	// The results on display, re-rendered when the theme changes.
 	lastStatus, lastNeedle string
@@ -49,48 +54,43 @@ type match struct {
 	isDef   bool
 }
 
-func NewSearchPanel(app *App) *SearchPanel {
-	s := &SearchPanel{app: app}
-	s.Root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 4)
-	s.Root.SetMarginTop(4)
+const (
+	tabDefs = iota
+	tabUsages
+)
+
+func NewSearchDialog(app *App) *SearchDialog {
+	s := &SearchDialog{app: app}
+	s.win, _ = gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	s.win.SetTitle("Search")
+	s.win.SetTransientFor(app.win)
+	s.win.SetDestroyWithParent(true)
+	s.win.SetTypeHint(gdk.WINDOW_TYPE_HINT_DIALOG)
+	s.win.SetDefaultSize(720, 520)
+	s.win.Connect("delete-event", func() bool { s.win.Hide(); return true })
+	s.win.Connect("key-press-event", func(_ *gtk.Window, ev *gdk.Event) bool {
+		if gdk.EventKeyNewFromEvent(ev).KeyVal() == gdk.KEY_Escape {
+			s.win.Hide()
+			return true
+		}
+		return false
+	})
+
 	s.entry, _ = gtk.SearchEntryNew()
 	s.entry.SetPlaceholderText("Search in project (Enter)")
+	s.entry.SetHExpand(true)
 	s.cs, _ = gtk.CheckButtonNewWithLabel("Match case")
 	s.status, _ = gtk.LabelNew("")
 	s.status.SetXAlign(0)
 	s.status.SetEllipsize(3) // PANGO_ELLIPSIZE_END
-	s.status.SetMarginStart(4)
 
-	s.store, _ = gtk.TreeStoreNew(glib.TYPE_STRING, glib.TYPE_STRING, glib.TYPE_INT, glib.TYPE_INT)
-	s.view, _ = gtk.TreeViewNewWithModel(s.store)
-	s.view.SetHeadersVisible(false)
-	s.view.SetTooltipColumn(srPath)
-	r, _ := gtk.CellRendererTextNew()
-	r.SetProperty("ellipsize", 3)
-	col, _ := gtk.TreeViewColumnNewWithAttribute("", r, "markup", srMarkup)
-	s.view.AppendColumn(col)
-	s.view.Connect("row-activated", func(_ *gtk.TreeView, path *gtk.TreePath) {
-		iter, err := s.store.GetIter(path)
-		if err != nil {
-			return
-		}
-		p := getString(s.store.ToTreeModel(), iter, srPath)
-		line := getInt(s.store.ToTreeModel(), iter, srLine)
-		colb := getInt(s.store.ToTreeModel(), iter, srCol)
-		if line < 0 {
-			if s.view.RowExpanded(path) {
-				s.view.CollapseRow(path)
-			} else {
-				s.view.ExpandRow(path, false)
-			}
-			return
-		}
-		if e := s.app.editors.Open(p); e != nil {
-			e.GotoLine(line, colb)
-		}
-	})
-	sw, _ := gtk.ScrolledWindowNew(nil, nil)
-	sw.Add(s.view)
+	s.defStore, s.defView = s.newResultView()
+	s.useStore, s.useView = s.newResultView()
+	s.defLbl, _ = gtk.LabelNew("Definition")
+	s.useLbl, _ = gtk.LabelNew("Usages")
+	s.nb, _ = gtk.NotebookNew()
+	s.nb.AppendPage(scrolled(s.defView), s.defLbl)
+	s.nb.AppendPage(scrolled(s.useView), s.useLbl)
 
 	s.entry.Connect("activate", s.run)
 	s.cs.Connect("toggled", func() {
@@ -98,15 +98,70 @@ func NewSearchPanel(app *App) *SearchPanel {
 			s.run()
 		}
 	})
-	top, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 2)
-	top.SetMarginStart(4)
-	top.SetMarginEnd(4)
-	top.PackStart(s.entry, false, false, 0)
+	top, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 8)
+	top.PackStart(s.entry, true, true, 0)
 	top.PackStart(s.cs, false, false, 0)
-	s.Root.PackStart(top, false, false, 0)
-	s.Root.PackStart(s.status, false, false, 0)
-	s.Root.PackStart(sw, true, true, 0)
+
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 6)
+	box.SetMarginTop(8)
+	box.SetMarginBottom(8)
+	box.SetMarginStart(8)
+	box.SetMarginEnd(8)
+	box.PackStart(top, false, false, 0)
+	box.PackStart(s.status, false, false, 0)
+	box.PackStart(s.nb, true, true, 0)
+	s.win.Add(box)
+	box.ShowAll()
 	return s
+}
+
+func scrolled(w gtk.IWidget) *gtk.ScrolledWindow {
+	sw, _ := gtk.ScrolledWindowNew(nil, nil)
+	sw.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+	sw.Add(w)
+	return sw
+}
+
+// newResultView makes a results tree; activating a match opens it in the
+// editor, and activating a group row toggles it.
+func (s *SearchDialog) newResultView() (*gtk.TreeStore, *gtk.TreeView) {
+	store, _ := gtk.TreeStoreNew(glib.TYPE_STRING, glib.TYPE_STRING, glib.TYPE_INT, glib.TYPE_INT)
+	view, _ := gtk.TreeViewNewWithModel(store)
+	view.SetHeadersVisible(false)
+	view.SetTooltipColumn(srPath)
+	r, _ := gtk.CellRendererTextNew()
+	r.SetProperty("ellipsize", 3)
+	col, _ := gtk.TreeViewColumnNewWithAttribute("", r, "markup", srMarkup)
+	view.AppendColumn(col)
+	view.Connect("row-activated", func(_ *gtk.TreeView, path *gtk.TreePath) {
+		iter, err := store.GetIter(path)
+		if err != nil {
+			return
+		}
+		m := store.ToTreeModel()
+		p := getString(m, iter, srPath)
+		line := getInt(m, iter, srLine)
+		colb := getInt(m, iter, srCol)
+		if line < 0 {
+			if view.RowExpanded(path) {
+				view.CollapseRow(path)
+			} else {
+				view.ExpandRow(path, false)
+			}
+			return
+		}
+		if e := s.app.editors.Open(p); e != nil {
+			e.GotoLine(line, colb)
+			s.app.win.Present()
+		}
+	})
+	return store, view
+}
+
+// present shows the dialog in the window's current theme.
+func (s *SearchDialog) present() {
+	s.app.themed(s.win)
+	s.win.Present()
 }
 
 func getString(m *gtk.TreeModel, iter *gtk.TreeIter, col int) string {
@@ -129,7 +184,10 @@ func getInt(m *gtk.TreeModel, iter *gtk.TreeIter, col int) int {
 	return i
 }
 
-func (s *SearchPanel) Focus(text string) {
+// Focus opens the dialog for a text search, optionally running one for text.
+func (s *SearchDialog) Focus(text string) {
+	s.present()
+	s.nb.SetCurrentPage(tabUsages)
 	if text != "" {
 		s.entry.SetText(text)
 	}
@@ -178,7 +236,7 @@ func readTextFile(p string) []byte {
 	return data
 }
 
-func (s *SearchPanel) run() {
+func (s *SearchDialog) run() {
 	needle, _ := s.entry.GetText()
 	if needle == "" {
 		return
@@ -188,7 +246,8 @@ func (s *SearchPanel) run() {
 	root := s.app.root
 	open := s.app.openBuffers()
 	s.status.SetText("Searching…")
-	s.store.Clear()
+	s.defStore.Clear()
+	s.useStore.Clear()
 
 	go func() {
 		var results []match
@@ -225,7 +284,7 @@ func (s *SearchPanel) run() {
 			if len(results) >= maxSearchResults {
 				msg += " (truncated)"
 			}
-			s.show(msg, results, needle)
+			s.show(msg, results, needle, false)
 			return false
 		})
 	}()
@@ -238,36 +297,30 @@ func pluralize(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// show fills the results tree grouped by file.
-func (s *SearchPanel) show(status string, results []match, needle string) {
+// show fills the Definition tab with the definitions among results and the
+// Usages tab with the rest, grouped by file. symbol selects the tab to show:
+// symbol lookups open on their definitions when there are any.
+func (s *SearchDialog) show(status string, results []match, needle string, symbol bool) {
 	s.lastStatus, s.lastResults, s.lastNeedle = status, results, needle
-	s.store.Clear()
+	s.defStore.Clear()
+	s.useStore.Clear()
 	s.status.SetText(status)
-	// Symbol results list their definitions first, in a group of their own.
+
+	addRow := func(store *gtk.TreeStore, parent *gtk.TreeIter, markup, path string, line, col int) *gtk.TreeIter {
+		it := store.Append(parent)
+		store.SetValue(it, srMarkup, markup)
+		store.SetValue(it, srPath, path)
+		store.SetValue(it, srLine, line)
+		store.SetValue(it, srCol, col)
+		return it
+	}
+
 	var defs []match
-	for _, m := range results {
-		if m.isDef {
-			defs = append(defs, m)
-		}
-	}
-	if len(defs) > 0 {
-		di := s.store.Append(nil)
-		s.store.SetValue(di, srMarkup, fmt.Sprintf("<b>Definitions</b> <small>(%d)</small>", len(defs)))
-		s.store.SetValue(di, srPath, "")
-		s.store.SetValue(di, srLine, -1)
-		s.store.SetValue(di, srCol, 0)
-		for _, m := range defs {
-			ci := s.store.Append(di)
-			s.store.SetValue(ci, srMarkup, "<small>"+html.EscapeString(relPath(s.app.root, m.path))+"</small> "+matchMarkup(s.app.theme, m, needle))
-			s.store.SetValue(ci, srPath, m.path)
-			s.store.SetValue(ci, srLine, m.line)
-			s.store.SetValue(ci, srCol, m.colByte)
-		}
-	}
 	byFile := map[string][]match{}
 	var files []string
 	for _, m := range results {
 		if m.isDef {
+			defs = append(defs, m)
 			continue
 		}
 		if _, ok := byFile[m.path]; !ok {
@@ -275,31 +328,41 @@ func (s *SearchPanel) show(status string, results []match, needle string) {
 		}
 		byFile[m.path] = append(byFile[m.path], m)
 	}
+
+	for _, m := range defs {
+		addRow(s.defStore, nil, "<small>"+html.EscapeString(relPath(s.app.root, m.path))+"</small> "+matchMarkup(s.app.theme, m, needle),
+			m.path, m.line, m.colByte)
+	}
+	if len(defs) == 0 {
+		addRow(s.defStore, nil, fmt.Sprintf("<i><span foreground=\"%s\">No definitions found</span></i>", s.app.theme.Dim), "", -1, 0)
+	}
+
 	sort.Strings(files)
 	for _, f := range files {
 		ms := byFile[f]
-		fi := s.store.Append(nil)
-		s.store.SetValue(fi, srMarkup, fmt.Sprintf("<b>%s</b> <small>(%d)</small>", html.EscapeString(relPath(s.app.root, f)), len(ms)))
-		s.store.SetValue(fi, srPath, f)
-		s.store.SetValue(fi, srLine, -1)
-		s.store.SetValue(fi, srCol, 0)
+		fi := addRow(s.useStore, nil, fmt.Sprintf("<b>%s</b> <small>(%d)</small>", html.EscapeString(relPath(s.app.root, f)), len(ms)), f, -1, 0)
 		for _, m := range ms {
-			ci := s.store.Append(fi)
-			s.store.SetValue(ci, srMarkup, matchMarkup(s.app.theme, m, needle))
-			s.store.SetValue(ci, srPath, m.path)
-			s.store.SetValue(ci, srLine, m.line)
-			s.store.SetValue(ci, srCol, m.colByte)
+			addRow(s.useStore, fi, matchMarkup(s.app.theme, m, needle), m.path, m.line, m.colByte)
 		}
 	}
 	if len(files) <= 30 {
-		s.view.ExpandAll()
+		s.useView.ExpandAll()
+	}
+
+	s.defLbl.SetText(fmt.Sprintf("Definition (%d)", len(defs)))
+	s.useLbl.SetText(fmt.Sprintf("Usages (%d)", len(results)-len(defs)))
+	if symbol && len(defs) > 0 {
+		s.nb.SetCurrentPage(tabDefs)
+	} else {
+		s.nb.SetCurrentPage(tabUsages)
 	}
 }
 
-// restyle redraws the current results in the window's theme colours.
-func (s *SearchPanel) restyle() {
+// restyle redraws the dialog and its results in the window's theme colours.
+func (s *SearchDialog) restyle() {
+	s.app.themed(s.win)
 	if s.lastResults != nil {
-		s.show(s.lastStatus, s.lastResults, s.lastNeedle)
+		s.show(s.lastStatus, s.lastResults, s.lastNeedle, s.nb.GetCurrentPage() == tabDefs)
 	}
 }
 

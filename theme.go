@@ -67,6 +67,33 @@ var themes = []*Theme{
 			hlType: "#b58900", hlFunction: "#268bd2", hlConstant: "#cb4b16", hlProperty: "#6c71c4",
 		},
 	},
+	{
+		Name: "Rust", BG: "#2b1a17", FG: "#e8d5c8", Panel: "#3a221d", Border: "#5a342b", Hover: "#462a24",
+		Selection: "#6e3a2c", Dim: "#9c7d70", MatchBG: "#d9822b", MatchFG: "#2b1a17", JumpLine: "#3f2620",
+		TermBG: "#241512", TermFG: "#e8d5c8", DefMarker: "#e8a87c",
+		Syntax: map[string]string{
+			hlKeyword: "#e0613a", hlString: "#c5b26a", hlComment: "#8a6c60", hlNumber: "#e8a87c",
+			hlType: "#f0b45a", hlFunction: "#f2d0a4", hlConstant: "#d4766a", hlProperty: "#c99a8a",
+		},
+	},
+	{
+		Name: "Green", BG: "#16241c", FG: "#d4e4d6", Panel: "#1c2e24", Border: "#2e4a3a", Hover: "#24392d",
+		Selection: "#2f5a42", Dim: "#7a9483", MatchBG: "#b8a43a", MatchFG: "#16241c", JumpLine: "#203529",
+		TermBG: "#121e17", TermFG: "#d4e4d6", DefMarker: "#7fd1a8",
+		Syntax: map[string]string{
+			hlKeyword: "#8fd16a", hlString: "#d6c27a", hlComment: "#5f7d6a", hlNumber: "#e09f6b",
+			hlType: "#7fd1a8", hlFunction: "#b5e8a0", hlConstant: "#6bbfd1", hlProperty: "#a8c9b4",
+		},
+	},
+	{
+		Name: "Purple", BG: "#1f1a2e", FG: "#ddd6f0", Panel: "#271f3a", Border: "#3e3359", Hover: "#2f2645",
+		Selection: "#4a3a72", Dim: "#8a80a6", MatchBG: "#c792ea", MatchFG: "#1f1a2e", JumpLine: "#2c2442",
+		TermBG: "#1a1626", TermFG: "#ddd6f0", DefMarker: "#89ddff",
+		Syntax: map[string]string{
+			hlKeyword: "#c792ea", hlString: "#c3e88d", hlComment: "#6e6690", hlNumber: "#f78c6c",
+			hlType: "#ffcb6b", hlFunction: "#82aaff", hlConstant: "#ff5370", hlProperty: "#b4a7e8",
+		},
+	},
 }
 
 func themeByName(name string) *Theme {

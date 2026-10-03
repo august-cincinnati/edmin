@@ -89,6 +89,7 @@ func (f *FileTree) Toolbar() *gtk.Box {
 	mk("document-new-symbolic", "New file (Ctrl+N)", func() { f.app.showExplorer(); f.create(false) })
 	mk("folder-new-symbolic", "New folder (Ctrl+Shift+N)", func() { f.app.showExplorer(); f.create(true) })
 	mk("view-refresh-symbolic", "Refresh file tree", f.Reload)
+	mk("find-location-symbolic", "Jump to open file (Ctrl+Shift+E)", f.RevealCurrent)
 	mk("pan-up-symbolic", "Collapse all folders", f.view.CollapseAll)
 	if sc, err := bar.GetStyleContext(); err == nil {
 		sc.AddClass("linked")
@@ -168,14 +169,30 @@ func (f *FileTree) iterFor(p string) (*gtk.TreeIter, bool) {
 	return parent, true
 }
 
-// reveal expands the tree down to p and selects it.
-func (f *FileTree) reveal(p string) {
+// reveal expands the tree down to p, selects it and scrolls it into view.
+func (f *FileTree) reveal(p string) bool {
 	iter, ok := f.iterFor(p)
 	if !ok {
-		return
+		return false
 	}
 	if tp, err := f.store.GetPath(iter); err == nil {
 		f.view.SetCursor(tp, nil, false)
+		f.view.ScrollToCell(tp, nil, true, 0, 0.3)
+	}
+	return true
+}
+
+// RevealCurrent shows the explorer and selects the file open in the current
+// tab, reloading once in case the file was created outside EdMin.
+func (f *FileTree) RevealCurrent() {
+	e := f.app.editors.Current()
+	if e == nil || e.Path == "" {
+		return
+	}
+	f.app.showExplorer()
+	if !f.reveal(e.Path) {
+		f.Reload()
+		f.reveal(e.Path)
 	}
 }
 
@@ -273,6 +290,9 @@ func (f *FileTree) onButton(_ *gtk.TreeView, ev *gdk.Event) bool {
 	add("New File…", func() { f.create(false) })
 	add("New Folder…", func() { f.create(true) })
 	add("Refresh", f.Reload)
+	if e := f.app.editors.Current(); e != nil && e.Path != "" {
+		add("Jump to Open File", f.RevealCurrent)
+	}
 	menu.ShowAll()
 	if top, err := menu.GetToplevel(); err == nil {
 		if w, ok := top.(*gtk.Window); ok {

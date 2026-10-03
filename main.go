@@ -24,10 +24,10 @@ type App struct {
 
 	editors *EditorArea
 	tree    *FileTree
-	search  *SearchPanel
+	search  *SearchDialog
 	build   *BuildPanel
 
-	leftPanel  *gtk.Notebook
+	leftPanel  *gtk.Box
 	rightPanel *gtk.Box
 	termPanel  *gtk.Box
 	termNB     *gtk.Notebook
@@ -164,7 +164,7 @@ func (a *App) buildUI() {
 
 	a.editors = NewEditorArea(a)
 	a.tree = NewFileTree(a)
-	a.search = NewSearchPanel(a)
+	a.search = NewSearchDialog(a)
 	a.build = NewBuildPanel(a)
 
 	// Header bar with panel toggles.
@@ -200,12 +200,8 @@ func (a *App) buildUI() {
 	hb.PackEnd(a.leftBtn)
 	a.win.SetTitlebar(hb)
 
-	// Left: explorer + search tabs.
-	a.leftPanel, _ = gtk.NotebookNew()
-	filesLbl, _ := gtk.LabelNew("Files")
-	searchLbl, _ := gtk.LabelNew("Search")
-	a.leftPanel.AppendPage(a.tree.Root, filesLbl)
-	a.leftPanel.AppendPage(a.search.Root, searchLbl)
+	// Left: file explorer.
+	a.leftPanel = a.tree.Root
 
 	// Bottom: tabbed terminals.
 	a.termPanel, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
@@ -330,10 +326,9 @@ func (a *App) updateStatus() {
 
 func (a *App) setStatusMsg(msg string) { a.status.SetText(msg) }
 
-// showExplorer opens the left panel on its Files tab.
+// showExplorer opens the left panel.
 func (a *App) showExplorer() {
 	a.leftBtn.SetActive(true)
-	a.leftPanel.SetCurrentPage(0)
 }
 
 // ---- Terminals ----
@@ -710,10 +705,9 @@ func (a *App) showRefs(title string, refs []SymbolRef, name string) {
 		ms[i] = match{path: r.Path, line: r.Line, colByte: r.ColByte, text: r.LineText, isDef: r.IsDef}
 	}
 	a.search.gen.Add(1) // cancel any running text search
-	a.search.show(title, ms, name)
+	a.search.show(title, ms, name, true)
+	a.search.present()
 	a.setStatusMsg(title)
-	a.leftBtn.SetActive(true)
-	a.leftPanel.SetCurrentPage(1)
 }
 
 // ---- Dialogs ----
@@ -903,8 +897,6 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 		}
 		return true
 	case ctrlShift && kv == gdk.KEY_f:
-		a.leftBtn.SetActive(true)
-		a.leftPanel.SetCurrentPage(1)
 		sel := ""
 		if e := a.editors.Current(); e != nil {
 			if s, en, ok := e.Buf.GetSelectionBounds(); ok && s.GetLine() == en.GetLine() {
@@ -915,6 +907,9 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 		return true
 	case ctrlShift && kv == gdk.KEY_b:
 		a.buildBtn.SetActive(!a.buildBtn.GetActive())
+		return true
+	case ctrlShift && kv == gdk.KEY_e:
+		a.tree.RevealCurrent()
 		return true
 	case ctrlShift && kv == gdk.KEY_o:
 		a.openFolderInNewWindow()
