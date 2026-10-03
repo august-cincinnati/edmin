@@ -180,9 +180,10 @@ ones that come back.
 | `Ctrl+1`                    | Open / focus file explorer               |
 | `Ctrl+Shift+1`              | Close file explorer                      |
 | `Ctrl+Shift+E`              | Jump to open file in explorer            |
+| `Delete` (in the explorer)  | Delete the selected file or folder (asks first) |
 | `Ctrl+2`                    | Open / focus terminal panel              |
 | `Ctrl+Shift+2`              | Close terminal panel                     |
-| `Ctrl+Shift+T`              | New terminal                             |
+| `Ctrl+Shift+T`              | New terminal (in the build pane: add command) |
 | `Ctrl+Shift+R` (in a terminal) | Rename the terminal's tab            |
 | Double-click terminal tab  | Rename terminal (`Enter` to save, `Esc` to cancel); renamed tabs reopen with the project |
 | `Ctrl+3`                    | Open / focus build panel                 |

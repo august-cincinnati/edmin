@@ -1119,6 +1119,9 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 			r.edit(t.Focus)
 		}
 		return true
+	case ctrlShift && kv == gdk.KEY_t && a.focusIn(a.build.Root):
+		a.build.edit(-1)
+		return true
 	case ctrlShift && kv == gdk.KEY_t:
 		a.newTerminal()
 		return true

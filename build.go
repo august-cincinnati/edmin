@@ -59,7 +59,7 @@ func NewBuildPanel(app *App) *BuildPanel {
 		bt.Connect("clicked", fn)
 		btns.PackStart(bt, false, false, 0)
 	}
-	mk("list-add-symbolic", "Add command", func() { b.edit(-1) })
+	mk("list-add-symbolic", "Add command (Ctrl+Shift+T)", func() { b.edit(-1) })
 	mk("document-edit-symbolic", "Edit selected command", func() {
 		if i := b.selected(); i >= 0 {
 			b.edit(i)

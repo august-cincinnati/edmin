@@ -108,7 +108,7 @@ func themeByName(name string) *Theme {
 // css styles the window chrome, editors, lists and terminals.
 func (t *Theme) css() string {
 	return fmt.Sprintf(`
-window, .background, headerbar, notebook header, notebook tab, paned > separator, .edmin-status {
+window, dialog, .background, headerbar, notebook header, notebook tab, paned > separator, .edmin-status {
 	background-color: %[3]s; background-image: none; color: %[2]s; border-color: %[4]s; }
 headerbar { box-shadow: none; }
 notebook header { border-color: %[4]s; }
@@ -159,6 +159,8 @@ func (t *Theme) scopedCSS() string {
 			sel = strings.TrimSpace(sel)
 			if rest, isWin := strings.CutPrefix(sel, "window"); isWin {
 				scoped = append(scoped, "window."+cls+rest)
+			} else if rest, isDlg := strings.CutPrefix(sel, "dialog"); isDlg {
+				scoped = append(scoped, "dialog."+cls+rest)
 			} else {
 				scoped = append(scoped, "."+cls+" "+sel)
 			}
@@ -168,14 +170,19 @@ func (t *Theme) scopedCSS() string {
 	return b.String()
 }
 
-// settingsCSS keeps the Settings window black on white whatever the theme,
-// so it stays readable while themes are being switched.
+// settingsCSS keeps the Settings window and the explorer's context menu black
+// on white whatever the theme, so they stay readable while themes are being
+// switched.
 const settingsCSS = `
 window.edmin-settings, .edmin-settings .background, .edmin-settings headerbar,
 .edmin-settings button, .edmin-settings radiobutton, .edmin-settings label {
 	background-color: #ffffff; background-image: none; color: #000000;
 	border-color: #c0c0c0; box-shadow: none; text-shadow: none; }
 .edmin-settings button:hover { background-color: #e8e8e8; }
+window.edmin-menu, menu.edmin-menu, .edmin-menu menuitem, .edmin-menu label {
+	background-color: #ffffff; background-image: none; color: #000000;
+	border-color: #c0c0c0; box-shadow: none; text-shadow: none; }
+.edmin-menu menuitem:hover, .edmin-menu menuitem:hover label { background-color: #e8e8e8; color: #000000; }
 `
 
 // loadThemeCSS installs the CSS for every theme once; windows pick theirs

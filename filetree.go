@@ -67,6 +67,15 @@ func NewFileTree(app *App) *FileTree {
 		f.app.editors.Open(p)
 	})
 	f.view.Connect("button-press-event", f.onButton)
+	f.view.Connect("key-press-event", func(_ *gtk.TreeView, ev *gdk.Event) bool {
+		k := gdk.EventKeyNewFromEvent(ev)
+		kv := k.KeyVal()
+		if shortcutMods(k.State()) != 0 || kv != gdk.KEY_Delete && kv != gdk.KEY_KP_Delete {
+			return false
+		}
+		f.deleteSelected()
+		return true
+	})
 
 	sw, _ := gtk.ScrolledWindowNew(nil, nil)
 	sw.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
@@ -294,9 +303,15 @@ func (f *FileTree) onButton(_ *gtk.TreeView, ev *gdk.Event) bool {
 		add("Jump to Open File", f.RevealCurrent)
 	}
 	menu.ShowAll()
+	// Black on white whatever the theme, like the Settings window.
+	if sc, err := menu.GetStyleContext(); err == nil {
+		sc.AddClass("edmin-menu")
+	}
 	if top, err := menu.GetToplevel(); err == nil {
 		if w, ok := top.(*gtk.Window); ok {
-			f.app.themed(w)
+			if sc, err := w.GetStyleContext(); err == nil {
+				sc.AddClass("edmin-menu")
+			}
 		}
 	}
 	menu.PopupAtPointer(ev)
@@ -339,6 +354,57 @@ func (f *FileTree) create(dir bool) {
 	f.reveal(full)
 	if !dir {
 		f.app.editors.Open(full)
+	}
+}
+
+// deleteSelected asks before deleting the selected file or folder, then
+// deletes it and closes any tabs open on it.
+func (f *FileTree) deleteSelected() {
+	sel, _ := f.view.GetSelection()
+	_, iter, ok := sel.GetSelected()
+	if !ok {
+		return
+	}
+	p, isDir := f.rowInfo(iter)
+	if rel, err := filepath.Rel(f.app.root, p); p == "" || err != nil || rel == "." || !insideRoot(rel) {
+		return
+	}
+	title, detail := "Delete file?", "%s will be permanently deleted."
+	if isDir {
+		title, detail = "Delete folder?", "%s and everything in it will be permanently deleted."
+	}
+	d := gtk.MessageDialogNew(f.app.win, gtk.DIALOG_MODAL, gtk.MESSAGE_QUESTION, gtk.BUTTONS_NONE, "%s", title)
+	f.app.themed(d)
+	d.FormatSecondaryText(detail, relPath(f.app.root, p))
+	d.AddButton("Cancel", gtk.RESPONSE_NO)
+	d.AddButton("Yes", gtk.RESPONSE_YES)
+	d.SetDefaultResponse(gtk.RESPONSE_YES)
+	if w, err := d.GetWidgetForResponse(gtk.RESPONSE_YES); err == nil && w != nil {
+		w.ToWidget().GrabFocus()
+	}
+	r := d.Run()
+	d.Destroy()
+	if r != gtk.RESPONSE_YES {
+		return
+	}
+	var err error
+	if isDir {
+		err = os.RemoveAll(p)
+	} else {
+		err = os.Remove(p)
+	}
+	// Close tabs on anything that was deleted, even if only partly.
+	for _, e := range append([]*Editor(nil), f.app.editors.editors...) {
+		if e.Path == p || isDir && strings.HasPrefix(e.Path, p+string(filepath.Separator)) {
+			if _, serr := os.Stat(e.Path); os.IsNotExist(serr) {
+				e.Buf.SetModified(false)
+				f.app.editors.Close(e)
+			}
+		}
+	}
+	f.Reload()
+	if err != nil {
+		f.app.showError("Could not delete "+filepath.Base(p), err.Error())
 	}
 }
 
