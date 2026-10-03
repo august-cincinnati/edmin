@@ -92,7 +92,31 @@ func main() {
 			app.focusWorkspace()
 		}
 	}
+	focusLastWindow()
 	gtk.Main()
+}
+
+// focusLastWindow makes the last window opened at startup the active one.
+// GNOME gives the keyboard focus only to the first new window of a starting
+// app, so when several projects reopen, the window left on top would ignore
+// the keyboard until clicked. Once GNOME has focused one of EdMin's windows,
+// EdMin may pass the focus on to another itself.
+func focusLastWindow() {
+	if len(apps) < 2 {
+		return
+	}
+	last := apps[len(apps)-1]
+	others := append([]*App(nil), apps[:len(apps)-1]...)
+	handles := make([]glib.SignalHandle, len(others))
+	for i, x := range others {
+		handles[i] = x.win.Connect("focus-in-event", func() bool {
+			for j, y := range others {
+				y.win.HandlerDisconnect(handles[j])
+			}
+			last.win.Present()
+			return false
+		})
+	}
 }
 
 // detachedEnv marks the background copy started by detach.

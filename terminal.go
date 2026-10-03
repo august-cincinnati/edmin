@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -35,13 +36,15 @@ type Terminal struct {
 	onExit       func()
 	theme        *Theme
 	shell        []string
-	sbLines      int  // scrollback lines currently in the buffer
-	follow       bool // keep the view pinned to the bottom
+	sbLines      int      // scrollback lines currently in the buffer
+	shown        [][]cell // every line in the buffer, as last rendered
+	cursorLine   int      // buffer line holding the cursor, or -1
+	follow       bool     // keep the view pinned to the bottom
 }
 
 // NewTerminal runs shell (the user's shell if empty) in dir.
 func NewTerminal(dir string, shell []string, theme *Theme, onExit func()) *Terminal {
-	t := &Terminal{dir: dir, shell: shell, theme: theme, onExit: onExit, tags: map[attr]*gtk.TextTag{}}
+	t := &Terminal{dir: dir, shell: shell, theme: theme, onExit: onExit, tags: map[attr]*gtk.TextTag{}, cursorLine: -1}
 	t.Root, _ = gtk.ScrolledWindowNew(nil, nil)
 	t.Root.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_ALWAYS)
 	t.view, _ = gtk.TextViewNew()
@@ -259,19 +262,23 @@ func (t *Terminal) tagFor(a attr) *gtk.TextTag {
 	return tag
 }
 
-// insertLine inserts one row of cells at iter, trimming trailing blanks
-// (but keeping at least minLen cells).
-func (t *Terminal) insertLine(iter *gtk.TextIter, l []cell, minLen int) {
+// trimLine drops trailing blank cells from l, keeping at least minLen.
+func trimLine(l []cell, minLen int) []cell {
 	end := len(l)
 	for end > minLen && l[end-1].ch == ' ' && l[end-1].a.bg == colorDefault && !l[end-1].a.inverse {
 		end--
 	}
+	return l[:end]
+}
+
+// insertLine inserts one row of cells at iter.
+func (t *Terminal) insertLine(iter *gtk.TextIter, l []cell) {
 	var sb strings.Builder
-	for i := 0; i < end; {
+	for i := 0; i < len(l); {
 		a := l[i].a
 		sb.Reset()
 		j := i
-		for ; j < end && l[j].a == a; j++ {
+		for ; j < len(l) && l[j].a == a; j++ {
 			sb.WriteRune(l[j].ch)
 		}
 		if tag := t.tagFor(a); tag != nil {
@@ -283,32 +290,31 @@ func (t *Terminal) insertLine(iter *gtk.TextIter, l []cell, minLen int) {
 	}
 }
 
+// render brings the buffer up to date with the emulator. Only the lines that
+// changed since the last render are rewritten: replacing the whole screen on
+// every frame makes the text view re-measure everything, so programs that
+// redraw often (spinners, TUIs) made the view jump about.
 func (t *Terminal) render() {
 	if t.vt == nil {
 		return
 	}
 	s := t.vt.Snapshot()
 
-	// Replace the screen region, appending newly scrolled-off lines first.
+	// The live region starts after the scrollback; it gains the lines that
+	// scrolled off since the last render, followed by the screen.
+	base := t.sbLines
 	if s.ClearScrollback {
-		t.buf.SetText("")
-		t.sbLines = 0
-	} else {
-		start := t.screenStartIter()
-		t.buf.Delete(start, t.buf.GetEndIter())
+		base = 0
 	}
-	iter := t.buf.GetEndIter()
+	var lines [][]cell
 	for _, l := range s.Scrollback {
-		t.insertLine(iter, l, 0)
-		t.buf.Insert(iter, "\n")
+		lines = append(lines, trimLine(l, 0))
 	}
-	t.sbLines += len(s.Scrollback)
-
 	// Before anything has scrolled off, drop the trailing blank rows below
 	// the cursor to avoid a huge empty area. Once there is scrollback, keep
 	// the full screen so a cleared screen (e.g. Ctrl+L) hides it.
 	last := len(s.Lines) - 1
-	for t.sbLines == 0 && last > s.CY && lineBlank(s.Lines[last]) {
+	for base+len(s.Scrollback) == 0 && last > s.CY && lineBlank(s.Lines[last]) {
 		last--
 	}
 	for y := 0; y <= last; y++ {
@@ -316,24 +322,70 @@ func (t *Terminal) render() {
 		if y == s.CY {
 			minLen = s.CX + 1
 		}
-		t.insertLine(iter, s.Lines[y], minLen)
-		if y < last {
-			t.buf.Insert(iter, "\n")
-		}
+		lines = append(lines, trimLine(s.Lines[y], minLen))
 	}
 
+	// Take the cursor off its old cell; a rewritten line loses it anyway.
+	if t.cursorLine >= 0 && t.cursorLine < len(t.shown) {
+		a := t.buf.GetIterAtLine(t.cursorLine)
+		b := t.buf.GetIterAtLine(t.cursorLine)
+		if !b.EndsLine() {
+			b.ForwardToLineEnd()
+		}
+		t.buf.RemoveTag(t.cursorTag, a, b)
+	}
+	t.cursorLine = -1
+
+	old := t.shown[base:]
+	for i, l := range lines {
+		n := base + i
+		switch {
+		case i < len(old):
+			if slices.Equal(old[i], l) {
+				continue
+			}
+			a := t.buf.GetIterAtLine(n)
+			b := t.buf.GetIterAtLine(n)
+			if !b.EndsLine() {
+				b.ForwardToLineEnd()
+			}
+			t.buf.Delete(a, b)
+			t.insertLine(a, l)
+		default:
+			iter := t.buf.GetEndIter()
+			if n > 0 {
+				t.buf.Insert(iter, "\n")
+			}
+			t.insertLine(iter, l)
+		}
+	}
+	if len(lines) < len(old) {
+		// Remove the leftover lines, along with the newline before them.
+		a := t.buf.GetIterAtLine(base + len(lines) - 1)
+		if !a.EndsLine() {
+			a.ForwardToLineEnd()
+		}
+		t.buf.Delete(a, t.buf.GetEndIter())
+	}
+	t.shown = append(t.shown[:base], lines...)
+	t.sbLines = base + len(s.Scrollback)
+
 	if s.CursorVisible {
-		base := t.screenStartIter()
-		base.ForwardLines(s.CY)
-		base.ForwardChars(s.CX)
-		ce := t.buf.GetIterAtOffset(base.GetOffset() + 1)
-		t.buf.ApplyTag(t.cursorTag, base, ce)
+		t.cursorLine = t.sbLines + s.CY
+		a := t.buf.GetIterAtLine(t.cursorLine)
+		a.ForwardChars(s.CX)
+		b := t.buf.GetIterAtOffset(a.GetOffset() + 1)
+		t.buf.ApplyTag(t.cursorTag, a, b)
 	}
 
 	if t.sbLines > termScrollback+500 {
 		drop := t.sbLines - termScrollback
 		t.buf.Delete(t.buf.GetStartIter(), t.buf.GetIterAtLine(drop))
+		t.shown = slices.Delete(t.shown, 0, drop)
 		t.sbLines -= drop
+		if t.cursorLine >= 0 {
+			t.cursorLine -= drop
+		}
 	}
 
 	if t.follow {
