@@ -287,8 +287,13 @@ func (t *Terminal) render() {
 	s := t.vt.Snapshot()
 
 	// Replace the screen region, appending newly scrolled-off lines first.
-	start := t.screenStartIter()
-	t.buf.Delete(start, t.buf.GetEndIter())
+	if s.ClearScrollback {
+		t.buf.SetText("")
+		t.sbLines = 0
+	} else {
+		start := t.screenStartIter()
+		t.buf.Delete(start, t.buf.GetEndIter())
+	}
 	iter := t.buf.GetEndIter()
 	for _, l := range s.Scrollback {
 		t.insertLine(iter, l, 0)
@@ -296,9 +301,11 @@ func (t *Terminal) render() {
 	}
 	t.sbLines += len(s.Scrollback)
 
-	// Drop the trailing blank rows below the cursor to avoid a huge empty area.
+	// Before anything has scrolled off, drop the trailing blank rows below
+	// the cursor to avoid a huge empty area. Once there is scrollback, keep
+	// the full screen so a cleared screen (e.g. Ctrl+L) hides it.
 	last := len(s.Lines) - 1
-	for last > s.CY && lineBlank(s.Lines[last]) {
+	for t.sbLines == 0 && last > s.CY && lineBlank(s.Lines[last]) {
 		last--
 	}
 	for y := 0; y <= last; y++ {

@@ -59,6 +59,25 @@ func TestVTScrollback(t *testing.T) {
 	}
 }
 
+func TestVTClearScrollback(t *testing.T) {
+	v := NewVT(3, 10)
+	for i := 0; i < 5; i++ {
+		v.Write([]byte{byte('a' + i), '\r', '\n'})
+	}
+	// What `clear` sends: home, erase screen, erase saved lines.
+	v.Write([]byte("\x1b[H\x1b[2J\x1b[3J$ "))
+	s := v.Snapshot()
+	if !s.ClearScrollback || len(s.Scrollback) != 0 {
+		t.Fatalf("clear kept scrollback: clear=%v sb=%d", s.ClearScrollback, len(s.Scrollback))
+	}
+	if got := v.PlainText(); got != "$         \n          \n          \n" {
+		t.Fatalf("screen after clear = %q", got)
+	}
+	if v.Snapshot().ClearScrollback {
+		t.Fatalf("ClearScrollback not reset after drain")
+	}
+}
+
 func TestVTWrapAndReply(t *testing.T) {
 	v := NewVT(3, 4)
 	var reply string

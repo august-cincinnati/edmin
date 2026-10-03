@@ -152,6 +152,7 @@ func (s *SearchDialog) newResultView() (*gtk.TreeStore, *gtk.TreeView) {
 		}
 		if e := s.app.editors.Open(p); e != nil {
 			e.GotoLine(line, colb)
+			s.win.Hide()
 			s.app.win.Present()
 		}
 	})

@@ -57,6 +57,7 @@ type VT struct {
 	AppCursorKeys     bool
 	BracketedPaste    bool
 	pendingScrollback [][]cell // lines scrolled off the top since last drain
+	clearScrollback   bool     // ED 3 was received since last drain
 
 	state   vtState
 	params  []byte
@@ -405,9 +406,15 @@ func (v *VT) csi(raw string, final rune) {
 			for y := 0; y < v.cy; y++ {
 				v.eraseLine(y, 0, v.cols)
 			}
-		case 2, 3:
+		case 2:
 			for y := 0; y < v.rows; y++ {
 				v.eraseLine(y, 0, v.cols)
+			}
+		case 3:
+			// Erase saved lines (what `clear` sends after ED 2).
+			if !v.altActive {
+				v.pendingScrollback = nil
+				v.clearScrollback = true
 			}
 		}
 	case 'K':
@@ -599,14 +606,19 @@ type Snapshot struct {
 	Lines         [][]cell
 	CX, CY        int
 	CursorVisible bool
+
+	// ClearScrollback asks the view to drop its scrollback before
+	// appending Scrollback.
+	ClearScrollback bool
 }
 
 // Snapshot copies the visible screen and drains pending scrollback.
 func (v *VT) Snapshot() Snapshot {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	s := Snapshot{Scrollback: v.pendingScrollback, CX: v.cx, CY: v.cy, CursorVisible: v.CursorVisible}
+	s := Snapshot{Scrollback: v.pendingScrollback, CX: v.cx, CY: v.cy, CursorVisible: v.CursorVisible, ClearScrollback: v.clearScrollback}
 	v.pendingScrollback = nil
+	v.clearScrollback = false
 	s.Lines = make([][]cell, len(v.lines))
 	for i, l := range v.lines {
 		s.Lines[i] = append([]cell(nil), l...)
