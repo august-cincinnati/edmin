@@ -37,7 +37,13 @@ type App struct {
 
 	status *gtk.Label
 
+	// The dividers: lpaned is [explorer | rest], rpaned [centre | build],
+	// vpaned [editor / terminal].
+	lpaned, rpaned, vpaned *gtk.Paned
+
 	leftBtn, termBtn, buildBtn *gtk.ToggleButton
+
+	settingsDlg *gtk.Dialog // the open Settings window, if any
 }
 
 // apps holds every open window; the program exits when the last one closes.
@@ -181,7 +187,7 @@ func (a *App) buildUI() {
 	hb.PackStart(newWinBtn)
 	hb.PackStart(a.tree.Toolbar())
 	settingsBtn, _ := gtk.ButtonNewFromIconName("open-menu-symbolic", gtk.ICON_SIZE_BUTTON)
-	settingsBtn.SetTooltipText("Settings (Ctrl+,)")
+	settingsBtn.SetTooltipText("Settings (Ctrl+4, close Ctrl+Shift+4)")
 	settingsBtn.Connect("clicked", a.showSettings)
 	mkToggle := func(icon, tip string) *gtk.ToggleButton {
 		b, _ := gtk.ToggleButtonNew()
@@ -191,9 +197,9 @@ func (a *App) buildUI() {
 		b.SetActive(true)
 		return b
 	}
-	a.buildBtn = mkToggle("system-run-symbolic", "Build panel (Ctrl+Shift+B)")
-	a.termBtn = mkToggle("utilities-terminal-symbolic", "Terminal (Ctrl+`)")
-	a.leftBtn = mkToggle("view-list-symbolic", "Explorer (Ctrl+B)")
+	a.buildBtn = mkToggle("system-run-symbolic", "Build panel (Ctrl+3, close Ctrl+Shift+3)")
+	a.termBtn = mkToggle("utilities-terminal-symbolic", "Terminal (Ctrl+2, close Ctrl+Shift+2)")
+	a.leftBtn = mkToggle("view-list-symbolic", "Explorer (Ctrl+1, close Ctrl+Shift+1)")
 	hb.PackEnd(settingsBtn)
 	hb.PackEnd(a.buildBtn)
 	hb.PackEnd(a.termBtn)
@@ -209,7 +215,7 @@ func (a *App) buildUI() {
 	a.termNB.SetScrollable(true)
 	newTerm, _ := gtk.ButtonNewFromIconName("list-add-symbolic", gtk.ICON_SIZE_MENU)
 	newTerm.SetRelief(gtk.RELIEF_NONE)
-	newTerm.SetTooltipText("New terminal (Ctrl+Shift+`)")
+	newTerm.SetTooltipText("New terminal (Ctrl+Shift+T)")
 	newTerm.Connect("clicked", func() { a.newTerminal() })
 	newTerm.Show()
 	a.termNB.SetActionWidget(newTerm, gtk.PACK_END)
@@ -220,20 +226,20 @@ func (a *App) buildUI() {
 	a.rightPanel = a.build.Root
 
 	// Layout: [left | [[editor / terminal] | right]]
-	vpaned, _ := gtk.PanedNew(gtk.ORIENTATION_VERTICAL)
-	vpaned.Pack1(a.editors.Root, true, false)
-	vpaned.Pack2(a.termPanel, false, false)
-	vpaned.SetPosition(560)
+	a.vpaned, _ = gtk.PanedNew(gtk.ORIENTATION_VERTICAL)
+	a.vpaned.Pack1(a.editors.Root, true, false)
+	a.vpaned.Pack2(a.termPanel, false, false)
+	a.vpaned.SetPosition(560)
 
-	rpaned, _ := gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
-	rpaned.Pack1(vpaned, true, false)
-	rpaned.Pack2(a.rightPanel, false, false)
-	rpaned.SetPosition(1300 - 250 - 240)
+	a.rpaned, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
+	a.rpaned.Pack1(a.vpaned, true, false)
+	a.rpaned.Pack2(a.rightPanel, false, false)
+	a.rpaned.SetPosition(1300 - 250 - 240)
 
-	lpaned, _ := gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
-	lpaned.Pack1(a.leftPanel, false, false)
-	lpaned.Pack2(rpaned, true, false)
-	lpaned.SetPosition(250)
+	a.lpaned, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
+	a.lpaned.Pack1(a.leftPanel, false, false)
+	a.lpaned.Pack2(a.rpaned, true, false)
+	a.lpaned.SetPosition(250)
 
 	a.status, _ = gtk.LabelNew("")
 	a.status.SetXAlign(0)
@@ -245,7 +251,7 @@ func (a *App) buildUI() {
 	}
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
-	box.PackStart(lpaned, true, true, 0)
+	box.PackStart(a.lpaned, true, true, 0)
 	box.PackStart(a.status, false, false, 0)
 	a.win.Add(box)
 	a.win.ShowAll()
@@ -874,6 +880,122 @@ func (a *App) openFolder() {
 
 // ---- Keyboard shortcuts ----
 
+// panelKey handles Ctrl+1-4, which open the explorer, terminal, build panel
+// and settings (focusing the panel if it is already open), and with Shift
+// held close them.
+func (a *App) panelKey(n int, close bool) {
+	if a.settingsDlg != nil {
+		if n == 4 && !close {
+			a.settingsDlg.Present()
+			return
+		}
+		// The modal Settings window is in the way of every panel.
+		a.settingsDlg.Response(gtk.RESPONSE_CLOSE)
+		if n == 4 {
+			return
+		}
+		glib.IdleAdd(func() { a.panelKey(n, close) })
+		return
+	}
+	btn := map[int]*gtk.ToggleButton{1: a.leftBtn, 2: a.termBtn, 3: a.buildBtn}[n]
+	if close {
+		if btn != nil && btn.GetActive() {
+			btn.SetActive(false)
+			if e := a.editors.Current(); e != nil {
+				e.View.GrabFocus()
+			}
+		}
+		return
+	}
+	if btn != nil {
+		// Opening the terminal panel focuses a terminal itself.
+		btn.SetActive(true)
+	}
+	switch n {
+	case 1:
+		a.tree.view.GrabFocus()
+	case 2:
+		if t := a.currentTerminal(); t != nil {
+			t.Focus()
+		} else {
+			a.newTerminal()
+		}
+	case 3:
+		a.build.view.GrabFocus()
+	case 4:
+		a.showSettings()
+	}
+}
+
+// resizeStep is how far one Ctrl+Alt+Arrow press moves a divider, in pixels.
+const resizeStep = 20
+
+// focusIn reports whether the window's focus is inside w.
+func (a *App) focusIn(w gtk.IWidget) bool {
+	f, err := a.win.GetFocus()
+	if err != nil || f == nil {
+		return false
+	}
+	target := w.ToWidget().Native()
+	for f != nil {
+		x := f.ToWidget()
+		if x.Native() == target {
+			return true
+		}
+		if f, err = x.GetParent(); err != nil {
+			return false
+		}
+	}
+	return false
+}
+
+// resizePane handles Ctrl+Alt+Arrow, which moves a divider of the focused pane
+// in the arrow's direction, as tmux's resize-pane does: Left/Right move the
+// pane's right edge if another panel is open to its right, else its left
+// edge; Up/Down likewise move the bottom edge, else the top.
+func (a *App) resizePane(kv uint) bool {
+	var dx, dy int
+	switch kv {
+	case gdk.KEY_Left, gdk.KEY_KP_Left:
+		dx = -1
+	case gdk.KEY_Right, gdk.KEY_KP_Right:
+		dx = 1
+	case gdk.KEY_Up, gdk.KEY_KP_Up:
+		dy = -1
+	case gdk.KEY_Down, gdk.KEY_KP_Down:
+		dy = 1
+	default:
+		return false
+	}
+	left, right, term := a.leftPanel.GetVisible(), a.rightPanel.GetVisible(), a.termPanel.GetVisible()
+	var p *gtk.Paned
+	switch {
+	case a.focusIn(a.leftPanel):
+		if dx != 0 {
+			p = a.lpaned
+		}
+	case a.focusIn(a.rightPanel):
+		if dx != 0 {
+			p = a.rpaned
+		}
+	case a.focusIn(a.editors.Root), a.focusIn(a.termPanel):
+		switch {
+		case dy != 0 && term:
+			p = a.vpaned
+		case dx != 0 && right:
+			p = a.rpaned
+		case dx != 0 && left:
+			p = a.lpaned
+		}
+	}
+	if p == nil {
+		return false
+	}
+	// GTK clamps the position to what the panes' minimum sizes allow.
+	p.SetPosition(p.GetPosition() + (dx+dy)*resizeStep)
+	return true
+}
+
 func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 	k := gdk.EventKeyNewFromEvent(ev)
 	mods := shortcutMods(k.State())
@@ -884,17 +1006,13 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 
 	// Shortcuts that work everywhere, including inside a terminal.
 	switch {
-	case (ctrl || ctrlShift) && (kv == gdk.KEY_grave || kv == gdk.KEY_asciitilde || kv == gdk.KEY_dead_grave):
-		if ctrlShift {
-			a.newTerminal()
-		} else {
-			a.termBtn.SetActive(!a.termBtn.GetActive())
-			if !a.termBtn.GetActive() {
-				if e := a.editors.Current(); e != nil {
-					e.View.GrabFocus()
-				}
-			}
-		}
+	case mods == gdk.CONTROL_MASK|gdk.MOD1_MASK && a.resizePane(kv):
+		return true
+	case (ctrl || ctrlShift) && panelDigit(kv) != 0:
+		a.panelKey(panelDigit(kv), ctrlShift)
+		return true
+	case ctrlShift && kv == gdk.KEY_t:
+		a.newTerminal()
 		return true
 	case ctrlShift && kv == gdk.KEY_f:
 		sel := ""
@@ -905,14 +1023,15 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 		}
 		a.search.Focus(sel)
 		return true
-	case ctrlShift && kv == gdk.KEY_b:
-		a.buildBtn.SetActive(!a.buildBtn.GetActive())
-		return true
 	case ctrlShift && kv == gdk.KEY_e:
 		a.tree.RevealCurrent()
 		return true
 	case ctrlShift && kv == gdk.KEY_o:
 		a.openFolderInNewWindow()
+		return true
+	case ctrlShift && kv == gdk.KEY_x:
+		// Goes through delete-event, like the title bar's close button.
+		a.win.Close()
 		return true
 	}
 	if inTerm || !ctrl && !ctrlShift {
@@ -937,11 +1056,6 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 			a.editors.ShowFind()
 			return true
 		}
-	case gdk.KEY_b:
-		if ctrl {
-			a.leftBtn.SetActive(!a.leftBtn.GetActive())
-			return true
-		}
 	case gdk.KEY_n:
 		a.showExplorer()
 		a.tree.create(ctrlShift)
@@ -949,11 +1063,6 @@ func (a *App) onKey(_ *gtk.Window, ev *gdk.Event) bool {
 	case gdk.KEY_o:
 		if ctrl {
 			a.openFolder()
-			return true
-		}
-	case gdk.KEY_comma:
-		if ctrl {
-			a.showSettings()
 			return true
 		}
 	case gdk.KEY_z:

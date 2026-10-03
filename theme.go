@@ -168,6 +168,16 @@ func (t *Theme) scopedCSS() string {
 	return b.String()
 }
 
+// settingsCSS keeps the Settings window black on white whatever the theme,
+// so it stays readable while themes are being switched.
+const settingsCSS = `
+window.edmin-settings, .edmin-settings .background, .edmin-settings headerbar,
+.edmin-settings button, .edmin-settings radiobutton, .edmin-settings label {
+	background-color: #ffffff; background-image: none; color: #000000;
+	border-color: #c0c0c0; box-shadow: none; text-shadow: none; }
+.edmin-settings button:hover { background-color: #e8e8e8; }
+`
+
 // loadThemeCSS installs the CSS for every theme once; windows pick theirs
 // through a style class.
 func loadThemeCSS() {
@@ -175,6 +185,7 @@ func loadThemeCSS() {
 	for _, t := range themes {
 		css.WriteString(t.scopedCSS())
 	}
+	css.WriteString(settingsCSS)
 	p, _ := gtk.CssProviderNew()
 	p.LoadFromData(css.String())
 	screen, _ := gdk.ScreenGetDefault()
@@ -274,7 +285,21 @@ func (a *App) showSettings() {
 	d, _ := gtk.DialogNewWithButtons("Settings", a.win, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
 		[]interface{}{"Close", gtk.RESPONSE_CLOSE})
 	d.SetDefaultSize(320, -1)
-	a.themed(d)
+	if sc, err := d.GetStyleContext(); err == nil {
+		sc.AddClass("edmin-settings")
+	}
+	a.settingsDlg = d
+	defer func() { a.settingsDlg = nil }()
+	d.Connect("key-press-event", func(_ *gtk.Dialog, ev *gdk.Event) bool {
+		k := gdk.EventKeyNewFromEvent(ev)
+		mods := shortcutMods(k.State())
+		n := panelDigit(gdk.KeyvalToLower(k.KeyVal()))
+		if n == 0 || mods != gdk.CONTROL_MASK && mods != gdk.CONTROL_MASK|gdk.SHIFT_MASK {
+			return false
+		}
+		a.panelKey(n, mods&gdk.SHIFT_MASK != 0)
+		return true
+	})
 	box, _ := d.GetContentArea()
 	box.SetSpacing(6)
 	box.SetMarginStart(16)
@@ -300,7 +325,6 @@ func (a *App) showSettings() {
 				return
 			}
 			a.setTheme(t)
-			a.themed(d)
 			// Remember it for this project, and as the default for new ones.
 			ps := loadSettings(projectSettingsPath(a.root))
 			ps.Theme = t.Name

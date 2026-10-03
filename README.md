@@ -31,7 +31,7 @@ dependencies; everything else, including the terminal emulator, is plain Go.
     every usage grouped by file.
   - Works in every language listed under [Languages](#languages).
 - **Themes**: Light, Dark, Tan, Solarized Dark, Rust, Green and Purple. Choose one in Settings
-  (the menu button in the header bar, or `Ctrl+,`). It applies immediately to
+  (the menu button in the header bar, or `Ctrl+4`). It applies immediately to
   that window only, so different projects can look different. The choice is
   saved for the project in `.edmin/settings.json`, and in
   `~/.config/edmin/settings.json` as the default for projects without one.
@@ -172,19 +172,30 @@ ones that come back.
 | `Ctrl+Click`                | Go to definition / find usages           |
 | `Ctrl+O`                    | Open folder                              |
 | `Ctrl+Shift+O`              | Open folder in new window                |
-| `Ctrl+,`                    | Settings (theme)                         |
-| `Ctrl+B`                    | Toggle file explorer                     |
+| `Ctrl+Shift+X`              | Close window                             |
+| `Ctrl+4`                    | Open / focus Settings (theme)            |
+| `Ctrl+Shift+4`              | Close Settings                           |
+| `Ctrl+1`                    | Open / focus file explorer               |
+| `Ctrl+Shift+1`              | Close file explorer                      |
 | `Ctrl+Shift+E`              | Jump to open file in explorer            |
-| `` Ctrl+` ``                | Toggle terminal panel                    |
-| `` Ctrl+Shift+` ``          | New terminal                             |
+| `Ctrl+2`                    | Open / focus terminal panel              |
+| `Ctrl+Shift+2`              | Close terminal panel                     |
+| `Ctrl+Shift+T`              | New terminal                             |
 | Double-click terminal tab  | Rename terminal (`Enter` to save, `Esc` to cancel); renamed tabs reopen with the project |
-| `Ctrl+Shift+B`              | Toggle build panel                       |
+| `Ctrl+3`                    | Open / focus build panel                 |
+| `Ctrl+Shift+3`              | Close build panel                        |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste in the terminal         |
 | `Shift+PageUp` / `Shift+PageDown` | Scroll terminal history            |
+| `Ctrl+Alt+Arrow`            | Resize the focused pane (like tmux)      |
 
 When a terminal has focus, plain `Ctrl+<key>` combinations such as `Ctrl+C`
-and `Ctrl+B` go to the shell. Only the `Ctrl+Shift` shortcuts and `` Ctrl+` ``
-are handled by the editor.
+and `Ctrl+B` go to the shell. Only the `Ctrl+Shift` shortcuts and the panel
+shortcuts `Ctrl+1`–`Ctrl+4` and `Ctrl+Alt+Arrow` are handled by the editor.
+
+`Ctrl+Alt+Arrow` moves a divider next to the focused pane in the arrow's
+direction. Left/Right move the pane's right edge if a panel is open to its
+right, otherwise its left edge. Up/Down move the divider between the editor
+and the terminal.
 
 Renamed terminal tabs are saved per project in `.edmin/terminals.json`, in tab
 order. When the project opens again, EdMin opens one terminal for each saved
