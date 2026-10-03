@@ -70,11 +70,19 @@ func NewFileTree(app *App) *FileTree {
 	f.view.Connect("key-press-event", func(_ *gtk.TreeView, ev *gdk.Event) bool {
 		k := gdk.EventKeyNewFromEvent(ev)
 		kv := k.KeyVal()
-		if shortcutMods(k.State()) != 0 || kv != gdk.KEY_Delete && kv != gdk.KEY_KP_Delete {
+		if shortcutMods(k.State()) != 0 {
 			return false
 		}
-		f.deleteSelected()
-		return true
+		switch kv {
+		case gdk.KEY_Delete, gdk.KEY_KP_Delete:
+			f.deleteSelected()
+			return true
+		case gdk.KEY_Right, gdk.KEY_KP_Right:
+			return f.arrowRight()
+		case gdk.KEY_Left, gdk.KEY_KP_Left:
+			return f.arrowLeft()
+		}
+		return false
 	})
 
 	sw, _ := gtk.ScrolledWindowNew(nil, nil)
@@ -359,6 +367,44 @@ func (f *FileTree) create(dir bool) {
 
 // deleteSelected asks before deleting the selected file or folder, then
 // deletes it and closes any tabs open on it.
+// arrowRight expands the selected folder.
+func (f *FileTree) arrowRight() bool {
+	sel, _ := f.view.GetSelection()
+	_, iter, ok := sel.GetSelected()
+	if !ok {
+		return false
+	}
+	if _, isDir := f.rowInfo(iter); !isDir {
+		return true
+	}
+	if tp, err := f.store.GetPath(iter); err == nil {
+		f.view.ExpandRow(tp, false)
+	}
+	return true
+}
+
+// arrowLeft collapses the selected folder if it is open, else moves the
+// selection to its parent folder.
+func (f *FileTree) arrowLeft() bool {
+	sel, _ := f.view.GetSelection()
+	_, iter, ok := sel.GetSelected()
+	if !ok {
+		return false
+	}
+	tp, err := f.store.GetPath(iter)
+	if err != nil {
+		return true
+	}
+	if _, isDir := f.rowInfo(iter); isDir && f.view.RowExpanded(tp) {
+		f.view.CollapseRow(tp)
+		return true
+	}
+	if tp.GetDepth() > 1 && tp.Up() {
+		f.view.SetCursor(tp, nil, false)
+	}
+	return true
+}
+
 func (f *FileTree) deleteSelected() {
 	sel, _ := f.view.GetSelection()
 	_, iter, ok := sel.GetSelected()
