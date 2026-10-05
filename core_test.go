@@ -438,3 +438,17 @@ func TestMethodCalls(t *testing.T) {
 		}
 	}
 }
+
+func TestWithParams(t *testing.T) {
+	cases := []struct{ cmd, extra, want string }{
+		{"go test", "", "go test"},
+		{"go test", "  ", "go test"},
+		{"go test", "./... -run Foo", "go test ./... -run Foo"},
+		{"go test ", " -v ", "go test -v"},
+	}
+	for _, c := range cases {
+		if got := withParams(c.cmd, c.extra); got != c.want {
+			t.Errorf("withParams(%q, %q) = %q, want %q", c.cmd, c.extra, got, c.want)
+		}
+	}
+}
